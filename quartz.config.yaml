@@ -1,12 +1,12 @@
 # yaml-language-server: $schema=./quartz/plugins/quartz-plugins.schema.json
 configuration:
-  pageTitle: Quartz 5
+  pageTitle: Aya's Knowledge Garden
   pageTitleSuffix: ""
   enableSPA: true
   enablePopovers: true
   analytics:
     provider: plausible
-  locale: en-US
+  locale: zh-CN
   baseUrl: fotally.github.io
   ignorePatterns:
     - private
@@ -16,30 +16,30 @@ configuration:
     fontOrigin: googleFonts
     cdnCaching: true
     typography:
-      header: Schibsted Grotesk
-      body: Source Sans Pro
+      header: Cormorant Garamond
+      body: Noto Serif SC
       code: IBM Plex Mono
     colors:
       lightMode:
-        light: "#faf8f8"
-        lightgray: "#e5e5e5"
-        gray: "#b8b8b8"
-        darkgray: "#4e4e4e"
-        dark: "#2b2b2b"
-        secondary: "#284b63"
-        tertiary: "#84a59d"
-        highlight: rgba(143, 159, 169, 0.15)
-        textHighlight: "#fff23688"
+        light: "#fffdfc"
+        lightgray: "#f2edf5"
+        gray: "#aaa3b5"
+        darkgray: "#575066"
+        dark: "#27213f"
+        secondary: "#8064c6"
+        tertiary: "#d99aae"
+        highlight: "rgba(128, 100, 198, 0.10)"
+        textHighlight: "#f8dce688"
       darkMode:
-        light: "#161618"
-        lightgray: "#393639"
-        gray: "#646464"
-        darkgray: "#d4d4d4"
-        dark: "#ebebec"
-        secondary: "#7b97aa"
-        tertiary: "#84a59d"
-        highlight: rgba(143, 159, 169, 0.15)
-        textHighlight: "#b3aa0288"
+        light: "#191724"
+        lightgray: "#2d293d"
+        gray: "#77718a"
+        darkgray: "#d9d3e5"
+        dark: "#f4effa"
+        secondary: "#b69aeb"
+        tertiary: "#e2a8bb"
+        highlight: "rgba(182, 154, 235, 0.16)"
+        textHighlight: "#8f6f8f66"
 plugins:
   - source: "@quartz-community/created-modified-date"
     enabled: true
@@ -159,6 +159,11 @@ plugins:
     enabled: true
   - source: "@quartz-community/explorer"
     enabled: true
+    options:
+      title: 探索 Explorer
+      folderClickBehavior: link
+      folderDefaultState: collapsed
+      useSavedState: true
     layout:
       position: left
       priority: 50
@@ -172,9 +177,6 @@ plugins:
     layout:
       position: left
       priority: 20
-      group: toolbar
-      groupOptions:
-        grow: true
   - source: "@quartz-community/backlinks"
     enabled: true
     layout:
@@ -185,11 +187,13 @@ plugins:
     layout:
       position: beforeBody
       priority: 10
+      condition: not-index
   - source: "@quartz-community/content-meta"
     enabled: true
     layout:
       position: beforeBody
       priority: 20
+      condition: not-index
   - source: "@quartz-community/tag-list"
     enabled: false
     layout:
@@ -204,14 +208,12 @@ plugins:
     enabled: true
     layout:
       position: left
-      priority: 30
-      group: toolbar
+      priority: 90
   - source: "@quartz-community/reader-mode"
     enabled: true
     layout:
       position: left
-      priority: 35
-      group: toolbar
+      priority: 95
   - source: "@quartz-community/breadcrumbs"
     enabled: true
     layout:
@@ -236,7 +238,16 @@ plugins:
       position: footer
       priority: 50
   - source: "@quartz-community/recent-notes"
-    enabled: false
+    enabled: true
+    options:
+      title: 最近笔记
+      limit: 5
+      showTags: false
+      hideTagPages: true
+      hideFolderPages: true
+    layout:
+      position: right
+      priority: 40
   - source: "@quartz-community/spacer"
     enabled: true
     options: {}
@@ -285,7 +296,12 @@ layout:
         beforeBody: []
         left: []
         right: []
-    content: {}
+    content:
+      exclude:
+        - recent-notes
+    home:
+      exclude:
+        - backlinks
     folder:
       exclude:
         - reader-mode
