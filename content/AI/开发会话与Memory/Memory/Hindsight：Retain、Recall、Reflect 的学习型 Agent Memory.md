@@ -40,6 +40,14 @@ Hindsight 的核心主张是“让 Agent 学习，而不只是记住”：输入
 - **Bank 隔离与可配置性**：bank 是隔离的记忆单元，可承载项目或 Agent 范围，并有背景上下文和 Reflect 的 disposition 配置；这给项目级知识和个人记忆提供了边界。[^hindsight-banks]
 - **多入口接入**：Python、Node.js、Go、CLI、REST、MCP、LiteLLM/OpenAI/Anthropic wrapper 和编码 Agent 集成共享同一服务，使 Agent 适配集中在入口层。[^hindsight-clients][^hindsight-integrations]
 
+### 向量化与模型接口核验
+
+Hindsight 的 Recall 语义检索需要 Embedding；官方 Models 文档给出的默认模型是 `BAAI/bge-small-en-v1.5`，并说明 Embedding 与 Cross-Encoder 首次运行会从 Hugging Face 自动下载。官方页面没有确认默认模型的固定向量维度，因此部署时应以运行时返回维度和数据库 schema 为准。[^hindsight-models]
+
+向量模型与 LLM 是分开的配置面：LLM 支持 OpenAI、Anthropic、Gemini、Ollama、LM Studio、DeepSeek、OpenAI-compatible 和 LiteLLM 等 provider；Embedding 默认走本地 Hugging Face 模型，官方没有在该页确认一个可直接切换的 DeepSeek Embedding provider。公司 API 可以作为 LLM 或兼容 Embedding 端点，但 DeepSeek 常规聊天接口不能推定支持 Embedding。[^hindsight-models][^hindsight-configuration]
+
+向量、全文、实体和时间索引最终由 PostgreSQL/pgvector 等存储服务承载；中文项目不宜直接沿用英文默认模型，应改用经过中文评测的本地或兼容远程模型，并在建库前固定模型和维度。更换 Embedding 后需要全量重建向量数据，Cross-Encoder 也应作为独立的重排模型验证，不要把 LLM 名称当成 Embedding 能力。[^hindsight-storage][^hindsight-models]
+
 ### 代价与取舍
 
 结构化提取、实体消歧、观察合并和 Reflect 都可能调用 LLM；写入不再是简单的原文落盘，因而会增加延迟、模型成本和结果审核要求。Recall 的多路检索需要 PostgreSQL 中同时维护向量、全文、关系和 JSON 数据，运维模型比单文件 Markdown 更复杂。调研判断：Hindsight 的学习型记忆适合要从开发经历中归纳规律的团队，但“原始会话可回放”和“Skill 变更可审计”仍必须由另一层提供。
@@ -238,3 +246,4 @@ Hindsight 官方集成覆盖多个 Agent，但项目仍需核验目标 Agent 的
 [^hindsight-defense]: [Hindsight 官方文档：Memory Defense](https://hindsight.vectorize.io/developer/memory-defense)
 [^hindsight-production]: [Hindsight README：Running in Production](https://github.com/vectorize-io/hindsight#running-in-production)
 [^hindsight-cloud]: [Hindsight 官方文档：Self-hosted、Cloud 与 Enterprise](https://vectorize.io/hindsight)
+[^hindsight-models]: [Hindsight 官方 Models：默认 Embedding、Cross-Encoder 与 provider](https://hindsight.vectorize.io/developer/models)

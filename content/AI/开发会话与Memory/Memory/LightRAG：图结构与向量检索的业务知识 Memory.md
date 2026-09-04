@@ -40,6 +40,14 @@ LightRAG 的核心是“双层知识”：一层是由实体和关系组成的�
 - **存储后端可替换**：默认 JSON/KV、NetworkX 和 NanoVectorDB 适合测试；生产可用 PostgreSQL、MongoDB、OpenSearch，或用 Neo4j/Milvus/Qdrant 等分别承载图和向量。[^lightrag-readme][^lightrag-storage]
 - **模型绑定可切换**：官方列出 OpenAI/OpenAI-compatible、Ollama、Gemini、Bedrock、Azure 等 LLM，以及多种 Embedding；角色可拆分为 EXTRACT、QUERY、KEYWORD、VLM。[^lightrag-readme][^lightrag-provider]
 
+### 向量化与模型接口核验
+
+LightRAG 的文档、实体和关系语义检索都依赖 Embedding；服务通过 `EMBEDDING_BINDING`、`EMBEDDING_MODEL`、`EMBEDDING_DIM` 和 `EMBEDDING_TOKENIZER` 配置向量化函数。官方说明这些参数是部署者提供的模型配置，并没有为所有 binding 声明一个统一默认模型或统一维度；OpenAI-compatible 示例中常见 `text-embedding-3-small`、`bge-m3` 或多语言 E5，但实际维度必须以所选服务返回值为准。[^lightrag-provider][^lightrag-readme]
+
+官方 binding 覆盖 `openai`/`azure_openai`（兼容 OpenAI `/embeddings`）、`ollama`、`gemini`、`jina` 和 `voyageai` 等；Ollama/Gemini 还有专门的 provider 参数，向量存储可落本地 NanoVectorDB、PostgreSQL/pgvector、Milvus、Qdrant、OpenSearch 等。改变模型或维度后，官方提供 `rebuild_vdb` 清理并重建所有向量存储。[^lightrag-provider][^lightrag-storage][^lightrag-readme]
+
+公司 API 可走 OpenAI-compatible binding，DeepSeek 只有在提供 `/v1/embeddings` 的兼容网关中才可作为 Embedding；DeepSeek 聊天 API不能直接替代。中文项目应选择多语言模型并固定 `EMBEDDING_DIM`，同时验证 tokenizer、查询/文档前缀和后端索引上限；官方未给出中文效果保证，需用业务会话回放实测。[^lightrag-provider][^lightrag-readme]
+
 ### 代价与取舍
 
 实体关系抽取发生在每个文本块上，索引阶段会产生较多 LLM 调用；图结构的价值依赖抽取准确性、实体归一化和关系合并策略。官方明确指出默认内存存储只适合小规模测试，生产应选择数据库后端。[^lightrag-readme]

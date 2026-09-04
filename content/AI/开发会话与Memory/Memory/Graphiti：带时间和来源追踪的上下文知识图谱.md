@@ -36,6 +36,14 @@ Graphiti 用“实体 + 带有效期的事实关系 + 原始 Episode + 可选本
 - **混合检索**：语义 Embedding、BM25 和图遍历组合，减少仅依赖 LLM 摘要重排。[^graphiti-repository]
 - **可规定也可学习的本体**：可用 Pydantic 预先定义实体/边类型，也可让结构随数据出现。[^graphiti-repository]
 
+### 向量化与模型接口核验
+
+Graphiti 的语义检索需要 Embedding；核心 `EmbedderConfig` 的默认维度来自 `EMBEDDING_DIM` 环境变量，未设置时为 1024。默认 OpenAI embedder 模型是 `text-embedding-3-small`，但核心代码只负责按配置截取/写入向量，不会替团队自动迁移已有索引。[^graphiti-embedder-client][^graphiti-openai-embedder]
+
+官方实现提供 OpenAI、Azure OpenAI、Google Gemini 和 Voyage embedder；README 示例明确展示了 OpenAI-compatible/Ollama 的 `nomic-embed-text`，并把维度设为 768。向量实际存储在所选 Neo4j、FalkorDB、Neptune 等图后端的向量索引中，写入和查询必须使用同一维度。[^graphiti-repository][^graphiti-embedder-gemini][^graphiti-embedder-voyage]
+
+公司 API 或 DeepSeek 只有在暴露 OpenAI-compatible `/v1/embeddings` 时才可作为 OpenAI embedder 的候选；DeepSeek 的常规聊天 API 不能推定提供 Embedding。中文场景应选择已验证的多语言模型，并在建库前固定模型与维度；Graphiti 官方未给出中文召回质量基线，需实测。改变维度还要同步图数据库索引配置，否则会出现向量长度不一致。[^graphiti-repository][^graphiti-embedder-client]
+
 ### 代价与取舍
 
 每个关系的抽取、去重和时间判断依赖结构化输出能力较好的 LLM；图数据库和索引运维也比单纯向量库复杂。调研判断：Graphiti 的来源和时间模型特别适合团队知识，但需要在写入前设计项目、Skill、会话和成员的图模型，否则会形成难治理的“万能图”。
@@ -200,3 +208,7 @@ Graphiti 的匿名遥测默认启用但可用 `GRAPHITI_TELEMETRY_ENABLED=false`
 [^graphiti-server]: [Graphiti FastAPI Server README](https://github.com/getzep/graphiti/tree/main/server)
 [^graphiti-zep-boundary]: [Graphiti README 中 Graphiti 与 Zep 的边界](https://github.com/getzep/graphiti#graphiti-and-zep)
 [^graphiti-telemetry]: [Graphiti Telemetry 说明](https://github.com/getzep/graphiti#telemetry)
+[^graphiti-embedder-client]: [Graphiti EmbedderConfig：EMBEDDING_DIM 默认值](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/client.py)
+[^graphiti-openai-embedder]: [Graphiti OpenAI Embedder：默认模型与 Base URL](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/openai.py)
+[^graphiti-embedder-gemini]: [Graphiti Gemini Embedder：模型与输出维度配置](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/gemini.py)
+[^graphiti-embedder-voyage]: [Graphiti Voyage Embedder：模型配置](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/voyage.py)

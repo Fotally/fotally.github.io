@@ -35,6 +35,14 @@ Mem0 的主张是：把对话中的长期有用事实交给一个独立记忆层
 - **模型与存储可替换**：官方文档列出多种 LLM、Embedding 和向量数据库配置，默认值是 OpenAI 模型，但不是架构上的唯一选择。[^mem0-models]
 - **库与服务并存**：小规模 POC 可以 `pip install mem0ai` 直接嵌入；团队共享可运行自托管服务，统一鉴权、Dashboard 和 API。[^mem0-overview][^mem0-server]
 
+### 向量化与模型接口核验
+
+Mem0 OSS 的语义记忆路径需要 Embedding；官方 README 明确把 OpenAI `text-embedding-3-small` 列为默认 Embedding 模型，并建议混合搜索至少使用 Qwen 600M 或可比模型。官方配置页没有把一个固定向量维度写死在 Memory API 中，但明确提醒更换模型造成的维度不匹配会导致搜索错误，因此向量集合必须与当前模型输出维度一致。[^mem0-repository][^mem0-configuration]
+
+Python OSS 支持 OpenAI、Gemini、Azure OpenAI、Ollama、Hugging Face、Vertex AI、AWS Bedrock 等 embedder；向量存储可选 Qdrant、pgvector、Chroma、Pinecone、Redis、Weaviate、Milvus、Elasticsearch 等。TypeScript OSS 的 embedder/向量存储枚举略有不同，不能把 Platform 的 Graph Memory 当作 OSS 能力。[^mem0-configuration]
+
+公司 API 可按 OpenAI-compatible 方式验证，DeepSeek 只有在网关提供 Embedding 端点和实际模型时才能接入；DeepSeek 聊天 API 本身不能替代 Embedding。中文开发会话不应直接沿用英文默认模型，应在建库前选择多语言 Embedding，并以模型输出维度配置向量库；切换模型后需重建相关集合。[^mem0-configuration][^mem0-repository]
+
 ### 代价与取舍
 
 抽取和合并需要调用 LLM，因此每次写入会增加延迟和模型成本；记忆的正确性取决于抽取提示和冲突策略，不能将每条输出直接视为业务事实。调研判断：Mem0 更像“可插拔记忆服务”，而不是会主动理解整个代码仓库或自动产出 Skill 补丁的知识治理系统。
@@ -191,3 +199,4 @@ Mem0 没有声明原生读取各类 IDE/CLI 会话文件，也没有声明 Claud
 [^mem0-usage]: [Mem0 官方基本用法](https://github.com/mem0ai/mem0#basic-usage)
 [^mem0-models]: [Mem0 Supported LLMs and Embeddings](https://docs.mem0.ai/components/llm-models)
 [^mem0-paper]: [Mem0 技术论文](https://arxiv.org/abs/2504.19413)
+[^mem0-configuration]: [Mem0 OSS 配置：Embedder、向量存储与维度兼容性](https://github.com/mem0ai/mem0/blob/main/docs/open-source/configuration.mdx)

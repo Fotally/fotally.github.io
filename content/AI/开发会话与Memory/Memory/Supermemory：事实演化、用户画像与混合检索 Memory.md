@@ -39,6 +39,14 @@ Supermemory 将记忆视为会演化的事实图，而不是只读的向量数�
 - **Memory 与 RAG 合并检索**：默认 hybrid 模式同时检索个性化 Memory 和文档知识；也能选择 `memories` 模式只取长期事实。[^supermemory-search]
 - **本地模型与外部模型可替换**：自托管版本默认使用本地 Xenova 向量模型，并支持 Anthropic、OpenAI、Gemini、Groq 及任意 OpenAI 兼容端点；因此可将公司 API 或 DeepSeek 作为配置项。[^supermemory-selfhost-config]
 
+### 向量化与模型接口核验
+
+Supermemory local 默认使用本地 ONNX Embedding：`Xenova/bge-base-en-v1.5`，768 维，不需要 API Key；官方明确警告该默认模型是 English-only。多语言示例使用 `Xenova/bge-m3`、1024 维。远程选项包括 OpenAI `text-embedding-3-small`/1536 维、Gemini `text-embedding-004`/768 维，以及以 Ollama 的 `nomic-embed-text`/768 维走 OpenAI-compatible 接口。[^supermemory-embeddings]
+
+向量由 local server 内部维护并写入本地数据目录的图/索引存储；Embedding provider 通过 `SUPERMEMORY_EMBEDDING_PROVIDER`、`MODEL`、`DIMENSIONS`、`BASE_URL` 配置。官方要求模型和维度与已有数据一致，变更后必须使用新数据目录或重新摄取，维度不匹配时服务器拒绝启动。[^supermemory-embeddings][^supermemory-selfhost-config]
+
+公司 API 可使用 `openai` 或兼容远程 provider，DeepSeek 只有在暴露 `/v1/embeddings` 并提供实际向量模型时才可接入；DeepSeek 聊天 API 不等于 Embedding API。中文会话不应保留英文默认模型，应在首次建库前切换多语言模型并评测中英混合术语、代码标识符和 BM25 回退效果。[^supermemory-embeddings]
+
 ### 代价与取舍
 
 事实抽取、摘要和上下文切分需要 LLM，记忆质量、延迟和费用取决于所配置的模型；官方明确指出自托管使用调用方提供的模型，而托管平台使用其优化的专有抽取模型。[^supermemory-selfhost-config]

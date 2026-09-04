@@ -35,6 +35,14 @@ Cognee 把记忆设计为可运行的数据管道：输入数据经过 add/cogni
 - **图 + 向量 + 本体**：同时支持语义检索和关系推理，并通过 ontology grounding 组织业务域知识。[^cognee-repository]
 - **插件/MCP 多接入面**：提供 API、MCP Server、TypeScript/Rust 客户端和 Claude Code 插件，降低不同 Agent 的接入成本。[^cognee-repository][^cognee-mcp]
 
+### 向量化与模型接口核验
+
+Cognee 的默认语义检索路径需要 Embedding。当前配置类默认 `embedding_provider=openai`、`embedding_model=openai/text-embedding-3-large`，并在能从 LiteLLM/FastEmbed 识别模型时自动解析维度；无法识别时回退到 3072 维。官方配置接口也直接给出了 FastEmbed 的 `BAAI/bge-small-en-v1.5`/384 维示例。[^cognee-embedding-config][^cognee-config]
+
+官方配置支持 OpenAI、FastEmbed、Ollama、LiteLLM 和 OpenAI-compatible 端点；官方模板示例包括 OpenAI `text-embedding-3-large`/3072 维、Ollama `nomic-embed-text:latest`/768 维。LanceDB 是默认向量后端，亦可切换 pgvector、Turso，或安装社区适配器接入 Qdrant、Weaviate、Milvus、ChromaDB。[^cognee-env][^cognee-vector-db]
+
+公司 OpenAI-compatible API 可以通过 `EMBEDDING_ENDPOINT`、模型名和维度接入；DeepSeek 当前不能直接假定可作为 Embedding provider，需确认公司网关是否暴露 `/v1/embeddings` 以及目标模型的输出维度。中文资料不应沿用默认英文模型而不做评测；更换模型或维度前必须清理并重建向量索引，否则会产生形状不匹配。[^cognee-env][^cognee-embedding-config]
+
 ### 代价与取舍
 
 图谱构建和 `improve` 会调用 LLM，质量和成本高于只存文本/向量；前端、MCP、Postgres/PGVector、Neo4j 等可选组件会增加部署选择。调研判断：Cognee 与“采集开发会话并沉淀为团队知识”的方向最接近，但插件仍需补上原始会话留存、授权策略和 Skill 变更证据模型。
@@ -198,3 +206,7 @@ Claude Code 插件在启动时连接 Cognee，在每次 prompt 前注入相关�
 [^cognee-claude]: [Cognee Integrations 官方仓库（Claude Code 插件）](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code)
 [^cognee-providers]: [Cognee LLM Provider 文档](https://docs.cognee.ai/configuration/llm-providers)
 [^cognee-server]: [Cognee Server/访问控制说明](https://github.com/topoteretes/cognee/tree/main/deployment)
+[^cognee-embedding-config]: [Cognee EmbeddingConfig 与维度解析](https://github.com/topoteretes/cognee/blob/main/cognee/infrastructure/databases/vector/embeddings/config.py)
+[^cognee-config]: [Cognee 配置 API：Embedding provider/model/dimensions](https://github.com/topoteretes/cognee/blob/main/cognee/api/v1/config/config.py)
+[^cognee-env]: [Cognee 官方环境变量模板：Embedding 示例](https://github.com/topoteretes/cognee/blob/main/.env.template)
+[^cognee-vector-db]: [Cognee 向量数据库支持与适配器](https://github.com/topoteretes/cognee/blob/main/cognee/infrastructure/databases/vector/supported_databases.py)

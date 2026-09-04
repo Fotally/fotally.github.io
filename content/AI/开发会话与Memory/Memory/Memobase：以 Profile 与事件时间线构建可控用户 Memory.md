@@ -40,6 +40,14 @@ Memobase的核心判断是：对长期个性化上下文，应该把原始互动
 - **Profile、Event 与 Event Gist 分层**：Profile保存可归纳的用户事实；Event保存一次处理后的事件数据和时间；Event Gist是更细粒度的事件摘要，可配合 embedding 做时间线语义检索。源码的数据表和 API 响应模型明确区分这三种产物。[^database-model][^response-model][^event-controller]
 - **模型和 Embedding 接口可配置**：服务端用 `llm_base_url`、`llm_api_key`、`best_llm_model` 配置 LLM，并支持 OpenAI SDK 兼容服务；事件 embedding 可选 OpenAI-compatible、Jina、Ollama，亦可关闭。[^server-readme][^config-env]
 
+### 向量化与模型接口核验
+
+Memobase 的 Profile 抽取和事件时间线可以在关闭 `enable_event_embedding` 时运行；只有事件/Event Gist 的语义查询需要 Embedding。官方配置样例给出 LM Studio 的 `text-embedding-qwen3-embedding-8b`、`embedding_dim: 4096`，但没有声明这是全局默认值；使用其他模型时应显式配置实际输出维度。[^server-readme][^config-env]
+
+官方支持 OpenAI-compatible SDK、Jina Embedding 和 Ollama Embedding，并将向量写入 PostgreSQL/pgvector；没有证据表明 Memobase 内置了可供任意模型自动发现的 Embedding 目录。公司兼容 API 可以按 OpenAI 形态接入，DeepSeek 只有在网关同时暴露 Embedding 接口和模型时才可使用。[^server-readme][^config-env]
+
+中文会话的 Profile 抽取可单独使用中文 LLM，但事件语义检索仍取决于 Embedding 的多语言能力；官方没有给出中文召回基线。切换模型或维度前应新建/重建 pgvector 数据，避免旧 Event 向量与新查询向量不兼容；若只验证 Profile/时间标签，可先关闭 Embedding 减少依赖。[^database-model][^event-controller][^config-env]
+
 ### 代价与取舍
 
 Profile 槽位带来可控性和较稳定的召回，但它要求在配置阶段先定义知识分类；没有被槽位覆盖的项目事实可能只能作为事件或 Blob 保存，不能自动获得同等的结构化治理。这是调研判断，官方只保证自定义 Profile 配置能力。[^profile-fundamentals]

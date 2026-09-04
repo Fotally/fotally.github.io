@@ -40,6 +40,14 @@ EverOS 的核心主张是“Markdown 是用户拥有的记忆事实源，索引�
 - **双轨与正交作用域**：按 `app_id`、`project_id`、`user_id`、`agent_id`、`session_id` 组合隔离检索，用户知识和 Agent Skill 分开演化。[^everos-readme][^everos-api]
 - **离线 Reflection**：可选的 `reflect_episodes` 按周期合并相关 Episode，重新抽取事实，并用 `deprecated_by` 标记旧条目；不是每次查询都重新总结。[^everos-ome]
 
+### 向量化与模型接口核验
+
+EverOS 的基础关键词检索可以不启用 Embedding；向量检索、混合检索以及部分 Reflection/Skill extraction 路径才需要单独的 `[embedding]` provider。当前官方默认配置为 OpenAI-compatible 端点 `https://api.deepinfra.com/v1/openai`、模型 `Qwen/Qwen3-Embedding-4B`，并没有在配置中声明固定向量维度；服务返回的维度必须在 LanceDB 的索引空间中保持一致。[^everos-default-config][^everos-quickstart]
+
+Embedding 配置只有 `model`、`api_key`、`base_url` 以及超时、批量和并发参数，接口形态是 OpenAI-compatible。官方没有确认 EverOS 内置的模型目录、向量维度自动探测或独立的 Embedding provider 枚举；因此可接公司兼容 API 或 DeepSeek 兼容网关的前提是它们提供 `/v1/embeddings`，具体模型名、维度和中文效果需要实测。[^everos-config][^everos-default-config]
+
+向量落在本地 LanceDB，并与 BM25、标量过滤联合检索；改变 Embedding 模型或输出维度应重建 `.index/lancedb`，不能把不同向量空间混在同一索引中。官方没有给出默认模型对中文业务知识的质量结论，中文试点应优先使用已验证的多语言模型，并保留关键词检索作为对照。[^everos-how-memory][^everos-storage]
+
 ### 代价与取舍
 
 Markdown 易于审查和 Git 管理，但多进程共享写入、访问权限和大规模并发需要额外设计；LanceDB 是派生索引，因而搜索存在最终一致性窗口。内置 OME 的异步任务和 APScheduler 适合单机持续演化，但不是分布式任务平台。调研判断：EverOS 与“会话 → 经验 → Skill”目标的贴合度很高，却更像单机运行时和文件协议，团队共享必须补齐认证、上传审批和协作治理。
@@ -235,3 +243,4 @@ API 搜索是最终一致的：Episode 落盘后，LanceDB 还要等待 Cascade�
 [^everos-quickstart]: [EverOS QUICKSTART.md](https://github.com/EverMind-AI/EverOS/blob/main/QUICKSTART.md)
 [^everos-config]: [EverOS 配置示例](https://github.com/EverMind-AI/EverOS/blob/main/config.example.toml)
 [^everos-integrations]: [EverOS README：Ecosystem Integrations](https://github.com/EverMind-AI/EverOS#ecosystem-integrations)
+[^everos-default-config]: [EverOS 默认配置：Embedding 端点与模型](https://github.com/EverMind-AI/EverOS/blob/main/src/everos/config/default.toml)

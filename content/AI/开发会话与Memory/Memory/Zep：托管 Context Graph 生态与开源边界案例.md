@@ -35,6 +35,14 @@ Zep 的核心是以时间知识图谱为中心组装上下文：用户消息和�
 - **多语言 SDK 和集成**：官方仓库维护 Python、TypeScript、Go SDK 以及多种 Agent framework integrations。[^zep-repository]
 - **托管性能与治理**：Zep Cloud 提供生产检索、Dashboard、审计、SLA 和企业支持，这些不等价于 Apache-2.0 仓库能力。[^graphiti-zep]
 
+### 向量化与模型接口核验
+
+当前 `getzep/zep` 仓库是 Cloud examples/integrations 集合，未提供当前 Context Graph Engine 的自托管 Embedding 配置、默认模型、向量维度或可替换向量库；这些能力属于托管产品边界，不能从 SDK 示例推定。[^zep-repository][^zep-docs]
+
+如果团队借鉴其开源 Graphiti 核心，Graphiti 默认使用 OpenAI `text-embedding-3-small`，核心默认维度为 1024，并提供 OpenAI/Azure/Gemini/Voyage embedder 及 OpenAI-compatible/Ollama 接入。这里的模型与维度是 Graphiti 的开源实现事实，不是 Zep Cloud 的自托管承诺。[^graphiti-zep][^zep-graphiti-embedder]
+
+因此公司 API/DeepSeek 是否可用于 Zep 本身应标记为“未确认”；只有在实际使用 Zep Cloud/Graphiti 接口时，分别确认其 Embedding 数据出境、模型选择和维度约束。中文检索、模型切换、旧向量迁移及向量后端均需以目标产品合同/运行配置为准，不能把 Zep 仓库的 Apache-2.0 许可证等价为完整内网方案。[^zep-docs][^graphiti-zep]
+
 ### 代价与取舍
 
 托管服务降低了图数据库、索引和权限运维，但要求使用 Zep Cloud API 和其数据边界；当前开源仓库无法提供同等自部署体验。调研判断：对本项目，Zep 更适合作为 Graphiti/Context Graph 的产品化对照，不适合作为单机内网首选。
@@ -189,3 +197,4 @@ Zep Cloud 的 Memory 产品能力很完整，但当前开源仓库不满足“�
 [^zep-docs]: [Zep 官方快速开始文档](https://help.getzep.com/v2/quickstart)
 [^zepctl]: [Zep 官方 zepctl CLI](https://github.com/getzep/zepctl)
 [^graphiti-zep]: [Graphiti README 中的 Zep 与 Graphiti 边界](https://github.com/getzep/graphiti#graphiti-and-zep)
+[^zep-graphiti-embedder]: [Graphiti 官方 Embedder 实现（Zep 开源对应框架）](https://github.com/getzep/graphiti/tree/main/graphiti_core/embedder)
