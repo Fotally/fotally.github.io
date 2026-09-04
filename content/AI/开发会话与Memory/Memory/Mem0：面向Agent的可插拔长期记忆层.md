@@ -28,6 +28,10 @@ Mem0 是记忆基础设施，不是开发会话采集器，也不负责发现某
 
 Mem0 的主张是：把对话中的长期有用事实交给一个独立记忆层处理，在写入时提取/合并，在读取时按查询召回，而不是让每个 Agent 自己管理完整历史。其开源实现既可嵌入应用，也有带 API Key、Dashboard 和审计能力的自托管 FastAPI 服务。[^mem0-overview][^mem0-server]
 
+### Memory 实现方式
+
+调用方通过 `add(messages)` 送入对话，LLM 抽取候选事实，随后做实体识别、Embedding 和去重/合并，并按 `user_id`、`agent_id`、`run_id` 写入历史与向量库。`search` 将语义、BM25 和实体匹配结果融合后返回长期事实；更新和删除由记忆层完成，不保留完整 Agent transcript 作为主要检索对象。[^mem0-overview][^mem0-core]
+
 ### 关键设计选择
 
 - **多级作用域**：用户、会话和 Agent 维度的 ID 让同一 API 能覆盖个人偏好、一次任务上下文和跨 Agent 共享知识。[^mem0-repository]

@@ -32,6 +32,10 @@ LightRAG 是 RAG/知识图谱基础设施，不是完整的 Agent Memory：它�
 
 LightRAG 的核心是“双层知识”：一层是由实体和关系组成的知识图，另一层是文本块、实体和关系的向量索引。查询时按问题提取关键词，在图上定位局部/全局上下文，再与向量结果合并交给 LLM 生成答案。[^lightrag-readme][^lightrag-operate]
 
+### Memory 实现方式
+
+文档或会话先切成文本块，LLM 从中抽取实体和关系并写入图存储，同时为文本块、实体和关系生成 Embedding；关键词索引补充精确匹配。查询阶段根据 local/global 模式在图、向量和关键词索引中取回结果，合并上下文后交给 LLM 生成回答，知识更新通过增量插入和索引维护完成。[^lightrag-readme][^lightrag-operate]
+
 ### 关键设计选择
 
 - **图与向量双存储**：图保留语义依赖和跨文档关系，向量保留相似文本、实体描述和关系描述，兼顾精确实体查询与语义召回。[^lightrag-readme][^lightrag-storage]

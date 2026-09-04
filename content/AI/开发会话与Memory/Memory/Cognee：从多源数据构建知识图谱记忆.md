@@ -28,6 +28,10 @@ Cognee 负责数据摄取、记忆构建、召回和 Agent 集成；它不自动
 
 Cognee 把记忆设计为可运行的数据管道：输入数据经过 add/cognify/improve 形成图谱和索引，查询阶段自动路由到会话缓存或图谱搜索。它的目标是让不同 Agent 共享同一知识基础，而不是把所有历史文本每次原样放进上下文。[^cognee-repository]
 
+### Memory 实现方式
+
+输入先经 `add`/`remember` 写入数据集；`cognify` 再完成切块、实体关系抽取、本体约束和 Embedding，分别落入图结构与向量索引。带 `session_id` 的内容先进入快速会话记忆，`recall/search` 按会话或长期图谱召回，`improve` 根据反馈异步修正派生知识。[^cognee-repository]
+
 ### 关键设计选择
 
 - **DAG/管道式知识构建**：`add`、`cognify`、`search`/`recall`、`improve` 等操作分离摄取、结构化和反馈改进。[^cognee-repository]

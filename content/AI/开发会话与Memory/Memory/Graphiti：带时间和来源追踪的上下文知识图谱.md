@@ -28,6 +28,10 @@ Graphiti 是图谱核心库和 MCP/REST 示例服务，不提供完整的团队�
 
 Graphiti 用“实体 + 带有效期的事实关系 + 原始 Episode + 可选本体”代替单一文档向量库，使 Agent 可以同时按语义、关键词、图关系和时间查询上下文。[^graphiti-repository]
 
+### Memory 实现方式
+
+每次 `add_episode` 先保留原始 `EpisodicNode`，再由 LLM 抽取 `EntityNode` 与带来源的 `EntityEdge`；边同时记录 `valid_at`、`invalid_at` 等时间状态。节点、边和 Episode 建立向量/全文索引，查询时融合语义、关键词、图遍历和重排；新事实通过失效旧边完成增量更新。[^graphiti-repository]
+
 ### 关键设计选择
 
 - **时间事实管理**：旧事实不直接删除，而是失效并保留历史，支持“现在为真”和“某个时间点为真”的查询。[^graphiti-repository]

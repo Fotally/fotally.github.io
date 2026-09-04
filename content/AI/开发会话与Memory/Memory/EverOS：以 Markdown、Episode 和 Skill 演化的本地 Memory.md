@@ -32,6 +32,10 @@ EverOS v1 明确面向个人 Agent 或小团队本地部署，明确不包含 10
 
 EverOS 的核心主张是“Markdown 是用户拥有的记忆事实源，索引和演化状态都可重建”。它把一次会话先固化为 Episode，再让 OME 根据策略生成事实、前瞻、画像、案例和 Skill；Agent 使用 LanceDB 的混合检索读取这些产物。[^everos-how-memory][^everos-architecture]
 
+### Memory 实现方式
+
+会话通过 Memory API 先写成带 frontmatter 的每日 Episode Markdown；Cascade/OME 随后从 Episode 异步派生 AtomicFact、Foresight、Profile、Agent Case 和 `SKILL.md`。Markdown 是可读事实源，SQLite/LanceDB 只保存可重建的元数据与检索索引，Agent 查询时通过关键词、向量和标量过滤召回对应记忆。[^everos-storage][^everos-ome]
+
 ### 关键设计选择
 
 - **Markdown-first**：每条业务记忆都有 YAML frontmatter 和明确路径，Episode 采用按日追加，Profile 采用单文件改写，Skill 采用目录加 `SKILL.md`（可带 `references/` 与 `scripts/`）。[^everos-storage]

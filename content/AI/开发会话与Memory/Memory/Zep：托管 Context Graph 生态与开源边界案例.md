@@ -28,6 +28,10 @@ Zep 的产品思路是从聊天历史、业务数据和用户行为组装相关�
 
 Zep 的核心是以时间知识图谱为中心组装上下文：用户消息和业务数据进入图谱，图谱根据当前/历史事实、关系和查询返回上下文。生产产品使用专有 Context Graph Engine，Graphiti 是其开源框架对应物。[^graphiti-zep][^zep-repository]
 
+### Memory 实现方式
+
+在 Zep Cloud 产品路径中，消息、线程和业务数据进入托管的 Episode/Observation 图谱，系统抽取带时间和关系的事实，再按用户/线程范围做图、向量和全文检索并组装上下文。当前 `getzep/zep` 仓库不包含这套 Context Graph Engine，因此这里的实现方式只能作为产品架构参考，不能当作可自托管实现。[^graphiti-zep][^zep-repository]
+
 ### 关键设计选择
 
 - **用户/线程/消息作为一等对象**：产品 API 具备用户、session/thread 和消息管理，便于按会话上下文组织数据。[^zep-repository][^zep-docs]

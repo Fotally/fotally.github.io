@@ -32,6 +32,10 @@ Memobase的官方定位是用户 Profile 记忆后端，不是开发会话采集
 
 Memobase的核心判断是：对长期个性化上下文，应该把原始互动先按用户缓冲，再提取为受配置约束的 Profile，同时保留可按时间访问的事件记录；在线请求优先读取已编译的结构化结果，而不是临时让 Agent 重新分析全部历史。[^project-repository][^profile-fundamentals]
 
+### Memory 实现方式
+
+输入先作为按用户/项目归属的 Blob 进入 buffer；达到 token、空闲或显式 `flush` 条件后，LLM 按 `topic/sub_topic` 生成 Profile Delta，并合并为 `UserProfile`，同时保存带时间的 `UserEvent`/`Event Gist`。在线调用通过 Profile、Event 或 Context API 取结构化结果，事件语义检索才额外使用 Embedding。[^project-repository][^database-model][^event-controller]
+
 ### 关键设计选择
 
 - **Profile 槽位优先于无结构记忆**：通过 `topic`、`sub_topic` 和描述定义要收集的属性；默认提供常见槽位，也可以在 `config.yaml` 中增加或完全覆盖槽位。这样可以把“业务术语”“领域规则”“接口约束”等知识限制在显式 schema 内，减少无边界记忆。[^profile-fundamentals][^best-practices]

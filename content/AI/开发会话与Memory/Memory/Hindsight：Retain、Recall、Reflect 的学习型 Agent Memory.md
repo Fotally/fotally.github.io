@@ -32,6 +32,10 @@ Hindsight 是记忆服务和 Agent 集成层，不是公司的会话资产管理
 
 Hindsight 的核心主张是“让 Agent 学习，而不只是记住”：输入通过 Retain 变成可关联的事实和经历，Recall 负责可控检索，Reflect 负责基于已检索记忆进行更深层的综合；观察和心理模型在后台持续整理。[^hindsight-readme][^hindsight-operations]
 
+### Memory 实现方式
+
+`Retain` 将对话、文档或 Agent 事件抽取为事实、实体、关系、时间和经历，并按 Memory Bank 隔离；这些结构化记忆进入向量与全文检索路径。`Recall` 返回相关事实/经历，`Reflect` 以检索结果为依据生成综合回答，后台再把观察和心理模型整理为后续可检索记忆。[^hindsight-retain][^hindsight-operations]
+
 ### 关键设计选择
 
 - **三操作分离**：Retain、Recall、Reflect 分别承担写入、结构化记忆检索和带立场的综合回答。调用方可在低延迟查事实时只用 Recall，也可以在需要解释“为什么”时使用 Reflect。[^hindsight-operations]

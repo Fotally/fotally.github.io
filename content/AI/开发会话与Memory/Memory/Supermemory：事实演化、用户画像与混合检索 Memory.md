@@ -32,6 +32,10 @@ Supermemory 不负责自动发现开发者本地 Claude Code 会话，也不定�
 
 Supermemory 将记忆视为会演化的事实图，而不是只读的向量数据库：写入时从对话和文档抽取事实，处理时间变化、矛盾和自动遗忘；读取时把用户画像与混合检索结果合并返回。[^supermemory-readme][^supermemory-concepts]
 
+### Memory 实现方式
+
+`add` 接收对话或文档，服务端异步完成摘要、切分、事实抽取和事实更新，并把来源文档、Memory 关系与 Embedding 写入本地图引擎。`profile` 返回静态事实、动态上下文和相关结果，`search` 按 `hybrid` 或 `memories` 模式融合文档与长期 Memory；事实冲突通过演化和过期处理，而不是简单追加文本。[^supermemory-readme][^supermemory-search]
+
 ### 关键设计选择
 
 - **统一 Memory 结构与 ontology**：对话、上传文件、连接器内容和抽取出的 Memory 共享一套容器/空间范围，避免个人上下文和知识库被拆成互不相通的系统。[^supermemory-readme]

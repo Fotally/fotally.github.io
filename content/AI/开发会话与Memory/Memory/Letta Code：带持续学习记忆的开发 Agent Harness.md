@@ -26,6 +26,10 @@ Letta Code 是完整的 Agent Harness，不是通用的团队会话数据仓库�
 
 Letta Code 把记忆视为 Agent 运行时状态的一部分，而不是每次请求外挂一段 RAG 文本。Agent 能通过工具和 Skill 读写记忆，在长期运行中修改自己的工作上下文。[^letta-code-repository][^letta-docs]
 
+### Memory 实现方式
+
+Agent 启动时把固定的 Memory Block 注入上下文，并通过记忆工具主动读写；本地长期状态保存为每个 Agent 独立的 MemoryFS Git 文件，Skill 也以文件形式演化。需要大规模 archival recall 时再把 passage 写入 Letta Server 的向量存储，因此本地路径与服务端向量路径是两种不同实现。[^letta-code-repository][^letta-docs-memory]
+
 ### 关键设计选择
 
 - **记忆优先的 Harness**：Agent 由模型、上下文、工具、权限、Skill 和持久化状态共同组成，适合长生命周期 Agent。[^letta-code-repository]

@@ -32,6 +32,10 @@ MemU 不是完整的团队会话管理平台。它提供宿主本地日志的发
 
 MemU 的核心判断是：让连接的 Agent 负责“理解和写作”，让轻量 MemoryService 负责“存储、Embedding 和检索”。这样记忆内容保留为可读的 Markdown，检索路径可以跨宿主共享，系统本身不必在每次查询时再次调用 LLM。[^memu-service][^memu-readme]
 
+### Memory 实现方式
+
+宿主 Agent 通过 adapter/job 从会话中判断要保存的事实或 Skill，并写成 Markdown 文件；`MemoryService` 为文件和片段建立元数据、作用域与 Embedding，保存到 SQLite 或 PostgreSQL/pgvector。后续 Agent 用 `retrieve` 做向量/过滤检索，返回原文件内容；MemoryService 不负责聊天式总结或事实判断。[^memu-service][^memu-readme]
+
 ### 关键设计选择
 
 - **Wiki/Markdown 作为记忆载体**：memory 和 skill 以有名称、有描述、有正文的文件形态进入系统，用户可以查看或修改文件；`commit_results` 将 Agent 实际产生的文件变化提交到存储并建立索引。[^memu-readme][^memu-agentic]
