@@ -1,3 +1,13 @@
+---
+title: "Letta Code：带持续学习记忆的开发 Agent Harness"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Letta Code
+role: primary
+brief_version: "1.0"
+---
+
 # Letta Code：带持续学习记忆的开发 Agent Harness
 
 > **项目快照**：官方仓库 <https://github.com/letta-ai/letta-code>｜核验日期 2026-09-03｜Stars 约 3.2k｜许可证 Apache-2.0｜仓库在核验日有提交，最新 Release 为 `v0.31.11`（2026-09-01）。[^letta-code-repository][^letta-code-license][^letta-code-release]
@@ -26,12 +36,24 @@ Letta Code 是完整的 Agent Harness，不是通用的团队会话数据仓库�
 
 Letta Code 把记忆视为 Agent 运行时状态的一部分，而不是每次请求外挂一段 RAG 文本。Agent 能通过工具和 Skill 读写记忆，在长期运行中修改自己的工作上下文。[^letta-code-repository][^letta-docs]
 
+### Memory 实现方式
+
+Agent 启动时把固定的 Memory Block 注入上下文，并通过记忆工具主动读写；本地长期状态保存为每个 Agent 独立的 MemoryFS Git 文件，Skill 也以文件形式演化。需要大规模 archival recall 时再把 passage 写入 Letta Server 的向量存储，因此本地路径与服务端向量路径是两种不同实现。[^letta-code-repository][^letta-docs-memory]
+
 ### 关键设计选择
 
 - **记忆优先的 Harness**：Agent 由模型、上下文、工具、权限、Skill 和持久化状态共同组成，适合长生命周期 Agent。[^letta-code-repository]
 - **MemoryFS/Git 持久化**：本地 Agent 的 memory 存在 `~/.letta/lc-local-backend/memfs/<agent-id>/memory` 下的 Git 仓库，记忆天然具有文件化、版本化的形态。[^letta-code-repository]
 - **Skill 与自我学习**：Skill 既可作为预制能力，也可在 Agent 学习中扩展；这和“经验候选→Skill 更新”的目标有概念上的连接。[^letta-code-repository][^letta-docs-skills]
 - **模型无关**：官方说明支持 Claude、GPT、Gemini、GLM、Kimi 等模型，模型选择通过配置/命令完成。[^letta-code-repository]
+
+### 向量化与模型接口核验
+
+Letta Code 的核心 MemoryFS、memory blocks 和 Skills 是文件/运行时状态，不要求先部署向量模型；因此个人本地路径可以只依赖 Node.js 与 Agent 模型。若接入 Letta Server 的 archival memory，写入 passage 时会创建 Embedding 并用于向量存储，此时需要额外的 `EmbeddingConfig`，包括模型、端点类型、维度和分块参数。[^letta-docs-memory][^letta-archival-embedding]
+
+官方 SDK 暴露的 Embedding endpoint type 包含 OpenAI、Anthropic、Bedrock、Google、Azure、Ollama、LM Studio、llama.cpp、vLLM、Hugging Face、Mistral、Together 和 Pinecone 等；但 Letta Code 仓库没有为本地 MemoryFS 声明默认 Embedding 模型或固定维度。历史 Letta Server 示例中可见 `letta-free`/1024 维配置，但它属于服务端默认/示例，不应当推定为当前 Code CLI 的要求。[^letta-archival-embedding][^letta-archival-example]
+
+公司 API 或 DeepSeek 只有在兼容 Letta 支持的 Embedding endpoint 类型和 `/embeddings` 请求形态时才能接入；DeepSeek 聊天模型不能直接当作 Embedding。中文语料需自行选多语言模型并验证维度；一旦把 archival 向量写入存储，替换模型/维度通常需要重建对应 archive，不能与旧向量混用。[^letta-archival-embedding]
 
 ### 代价与取舍
 
@@ -115,7 +137,7 @@ Letta 主仓库当前说明：历史 V1 Server 已退役，源代码在 `archive
 - 规划 Agent ID、项目目录和 MemoryFS 的持久化位置；团队共享还需设计同步/服务端存储。
 - 如果导出给 Skill 流程，需要增加 Hook 或事件转发器，记录用户确认的会话范围。
 
-### 接入过程
+### 最快验证路径
 
 1. `npm install -g @letta-ai/letta-code`，在目标代码库运行 `letta`，创建或恢复本地 Agent。[^letta-code-repository]
 2. 按模型配置选择 Claude、GPT、Gemini、DeepSeek 或公司兼容 API；在会话中以 Skill 和记忆工具积累项目上下文。[^letta-code-repository]
@@ -191,3 +213,5 @@ Letta Code 不提供把其他 Agent（Claude Code、Codex、Cursor）的原始�
 [^letta-docs-memory]: [Letta Memory 文档](https://docs.letta.com/concepts/memory)
 [^letta-docs-skills]: [Letta Skills 文档](https://docs.letta.com/guides/skills)
 [^letta-deployment]: [Letta Code Server Deployment](https://github.com/letta-ai/letta-code-server-deployment)
+[^letta-archival-embedding]: [Letta 官方 Passage API：EmbeddingConfig 与端点类型](https://docs.letta.com/api/python/resources/passages)
+[^letta-archival-example]: [Letta 官方仓库中的 embedding_config 示例](https://github.com/letta-ai/letta/issues/2043)

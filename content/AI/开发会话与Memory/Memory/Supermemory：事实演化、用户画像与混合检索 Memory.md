@@ -1,3 +1,13 @@
+---
+title: "Supermemory：事实演化、用户画像与混合检索 Memory"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Supermemory
+role: primary
+brief_version: "1.0"
+---
+
 # Supermemory：事实演化、用户画像与混合检索 Memory
 
 > **项目快照**：官方仓库 <https://github.com/supermemoryai/supermemory>｜核验日期 2026-09-04｜Stars 29,207｜许可证 MIT｜main 分支最近提交 2026-09-02；GitHub Releases 的本地服务器最新可见预发布版本为 `server-v0.0.7-rc.2`（2026-07-22）。[^supermemory-repository][^supermemory-license][^supermemory-release]
@@ -32,12 +42,24 @@ Supermemory 不负责自动发现开发者本地 Claude Code 会话，也不定�
 
 Supermemory 将记忆视为会演化的事实图，而不是只读的向量数据库：写入时从对话和文档抽取事实，处理时间变化、矛盾和自动遗忘；读取时把用户画像与混合检索结果合并返回。[^supermemory-readme][^supermemory-concepts]
 
+### Memory 实现方式
+
+`add` 接收对话或文档，服务端异步完成摘要、切分、事实抽取和事实更新，并把来源文档、Memory 关系与 Embedding 写入本地图引擎。`profile` 返回静态事实、动态上下文和相关结果，`search` 按 `hybrid` 或 `memories` 模式融合文档与长期 Memory；事实冲突通过演化和过期处理，而不是简单追加文本。[^supermemory-readme][^supermemory-search]
+
 ### 关键设计选择
 
 - **统一 Memory 结构与 ontology**：对话、上传文件、连接器内容和抽取出的 Memory 共享一套容器/空间范围，避免个人上下文和知识库被拆成互不相通的系统。[^supermemory-readme]
 - **静态画像与动态画像分离**：`profile.static` 适合稳定偏好、职责和长期事实，`profile.dynamic` 适合近期工作状态；调用方可以一次获取两者再拼进 Agent 提示词。[^supermemory-readme]
 - **Memory 与 RAG 合并检索**：默认 hybrid 模式同时检索个性化 Memory 和文档知识；也能选择 `memories` 模式只取长期事实。[^supermemory-search]
 - **本地模型与外部模型可替换**：自托管版本默认使用本地 Xenova 向量模型，并支持 Anthropic、OpenAI、Gemini、Groq 及任意 OpenAI 兼容端点；因此可将公司 API 或 DeepSeek 作为配置项。[^supermemory-selfhost-config]
+
+### 向量化与模型接口核验
+
+Supermemory local 默认使用本地 ONNX Embedding：`Xenova/bge-base-en-v1.5`，768 维，不需要 API Key；官方明确警告该默认模型是 English-only。多语言示例使用 `Xenova/bge-m3`、1024 维。远程选项包括 OpenAI `text-embedding-3-small`/1536 维、Gemini `text-embedding-004`/768 维，以及以 Ollama 的 `nomic-embed-text`/768 维走 OpenAI-compatible 接口。[^supermemory-embeddings]
+
+向量由 local server 内部维护并写入本地数据目录的图/索引存储；Embedding provider 通过 `SUPERMEMORY_EMBEDDING_PROVIDER`、`MODEL`、`DIMENSIONS`、`BASE_URL` 配置。官方要求模型和维度与已有数据一致，变更后必须使用新数据目录或重新摄取，维度不匹配时服务器拒绝启动。[^supermemory-embeddings][^supermemory-selfhost-config]
+
+公司 API 可使用 `openai` 或兼容远程 provider，DeepSeek 只有在暴露 `/v1/embeddings` 并提供实际向量模型时才可接入；DeepSeek 聊天 API 不等于 Embedding API。中文会话不应保留英文默认模型，应在首次建库前切换多语言模型并评测中英混合术语、代码标识符和 BM25 回退效果。[^supermemory-embeddings]
 
 ### 代价与取舍
 
@@ -124,7 +146,7 @@ Supermemory 直接覆盖“把业务知识和经验记住，并按项目和用�
 - 为项目、仓库、开发者和 Agent 设计稳定的 `containerTag`/space；不要把个人隐私和团队业务知识无区分地写入同一个范围。
 - 对 Claude Code、Codex、Cursor 等会话编写适配器，将消息、工具调用、代码改动、测试结果和 Skill 使用记录统一成提交给 `add` 的结构。
 
-### 接入过程
+### 最快验证路径
 
 1. 运行 `curl -fsSL https://supermemory.ai/install | bash`、`npx supermemory local` 或使用 SDK；local 首次启动在本地目录建立数据和 API Key。[^supermemory-selfhost-quickstart]
 2. 配置一个公司 API、DeepSeek 或其他 OpenAI-compatible LLM 的 `OPENAI_BASE_URL`、API Key 和模型名；为中文语料在首次建库前选择 `Xenova/bge-m3` 等多语言 Embedding 或远程模型。[^supermemory-selfhost-config][^supermemory-embeddings]

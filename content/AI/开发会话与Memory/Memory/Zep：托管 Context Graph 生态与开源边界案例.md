@@ -1,3 +1,13 @@
+---
+title: "Zep：托管 Context Graph 生态与开源边界案例"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Zep
+role: boundary_case
+brief_version: "1.0"
+---
+
 # Zep：托管 Context Graph 生态与开源边界案例
 
 > **项目快照**：官方仓库 <https://github.com/getzep/zep>｜核验日期 2026-09-03｜Stars 约 4.9k｜许可证 Apache-2.0｜当前仓库在核验日有维护，但仓库自述为 Zep Cloud 示例/集成集合；旧 Community Edition 已移至 `legacy` 且不再支持。[^zep-repository][^zep-license]
@@ -28,12 +38,24 @@ Zep 的产品思路是从聊天历史、业务数据和用户行为组装相关�
 
 Zep 的核心是以时间知识图谱为中心组装上下文：用户消息和业务数据进入图谱，图谱根据当前/历史事实、关系和查询返回上下文。生产产品使用专有 Context Graph Engine，Graphiti 是其开源框架对应物。[^graphiti-zep][^zep-repository]
 
+### Memory 实现方式
+
+在 Zep Cloud 产品路径中，消息、线程和业务数据进入托管的 Episode/Observation 图谱，系统抽取带时间和关系的事实，再按用户/线程范围做图、向量和全文检索并组装上下文。当前 `getzep/zep` 仓库不包含这套 Context Graph Engine，因此这里的实现方式只能作为产品架构参考，不能当作可自托管实现。[^graphiti-zep][^zep-repository]
+
 ### 关键设计选择
 
 - **用户/线程/消息作为一等对象**：产品 API 具备用户、session/thread 和消息管理，便于按会话上下文组织数据。[^zep-repository][^zep-docs]
 - **图谱与 Observation**：CLI/API 目录包含 graph、episode、observation、ontology 和 thread-summary 等概念，体现从原始输入到派生知识的分层。[^zepctl]
 - **多语言 SDK 和集成**：官方仓库维护 Python、TypeScript、Go SDK 以及多种 Agent framework integrations。[^zep-repository]
 - **托管性能与治理**：Zep Cloud 提供生产检索、Dashboard、审计、SLA 和企业支持，这些不等价于 Apache-2.0 仓库能力。[^graphiti-zep]
+
+### 向量化与模型接口核验
+
+当前 `getzep/zep` 仓库是 Cloud examples/integrations 集合，未提供当前 Context Graph Engine 的自托管 Embedding 配置、默认模型、向量维度或可替换向量库；这些能力属于托管产品边界，不能从 SDK 示例推定。[^zep-repository][^zep-docs]
+
+如果团队借鉴其开源 Graphiti 核心，Graphiti 默认使用 OpenAI `text-embedding-3-small`，核心默认维度为 1024，并提供 OpenAI/Azure/Gemini/Voyage embedder 及 OpenAI-compatible/Ollama 接入。这里的模型与维度是 Graphiti 的开源实现事实，不是 Zep Cloud 的自托管承诺。[^graphiti-zep][^zep-graphiti-embedder]
+
+因此公司 API/DeepSeek 是否可用于 Zep 本身应标记为“未确认”；只有在实际使用 Zep Cloud/Graphiti 接口时，分别确认其 Embedding 数据出境、模型选择和维度约束。中文检索、模型切换、旧向量迁移及向量后端均需以目标产品合同/运行配置为准，不能把 Zep 仓库的 Apache-2.0 许可证等价为完整内网方案。[^zep-docs][^graphiti-zep]
 
 ### 代价与取舍
 
@@ -119,7 +141,7 @@ Zep Cloud 的 Memory 产品能力很完整，但当前开源仓库不满足“�
 - 选择 framework integration、ingestion 工具或 MCP/CLI；准备将开发会话转换为 thread/message/episode。
 - 若要求内网和可控数据边界，需改选 Graphiti 或自建等价服务。
 
-### 接入过程
+### 最快验证路径
 
 1. 通过 SDK 创建用户/线程并写入消息或业务数据；或使用仓库 `ingestion` 工具导入 Slack、文档、Email、JSON/CSV 等。[^zep-repository]
 2. 查询图谱节点、边、episode 或 observation，组装给 Agent 的上下文。[^zepctl]
@@ -189,3 +211,4 @@ Zep Cloud 的 Memory 产品能力很完整，但当前开源仓库不满足“�
 [^zep-docs]: [Zep 官方快速开始文档](https://help.getzep.com/v2/quickstart)
 [^zepctl]: [Zep 官方 zepctl CLI](https://github.com/getzep/zepctl)
 [^graphiti-zep]: [Graphiti README 中的 Zep 与 Graphiti 边界](https://github.com/getzep/graphiti#graphiti-and-zep)
+[^zep-graphiti-embedder]: [Graphiti 官方 Embedder 实现（Zep 开源对应框架）](https://github.com/getzep/graphiti/tree/main/graphiti_core/embedder)

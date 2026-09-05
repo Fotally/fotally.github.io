@@ -1,3 +1,13 @@
+---
+title: "Lunary：会话日志、反馈与开源边界案例"
+kind: open-source-research-report
+status: completed
+topic: AI 开发会话收集
+project: Lunary
+role: boundary_case
+brief_version: "1.0"
+---
+
 # Lunary：会话日志、反馈与开源边界案例
 
 > **项目快照**：当前公开代码仓库 <https://github.com/appl-team/lunary>（由 `itsharex/llmonitor` fork 而来；官方组织历史仓库为已归档的 <https://github.com/lunary-ai/lunary-py>，其 README 指向的 `lunary-ai/lunary` 当前不可访问）｜核验日期 2026-09-04｜Stars 0（历史 Python SDK 21）｜许可证 Apache-2.0（当前公开仓库）｜当前公开仓库仍可浏览但社区验证不足；历史 Python SDK 于 2025-04-15 归档。[^lunary-current-repository][^lunary-legacy-repository][^lunary-license][^lunary-legacy-archive]
@@ -127,7 +137,7 @@ Lunary 的 thread/message/run/feedback 数据模型与“会话复盘”相近�
 - 使用 JavaScript/Python SDK、支持的框架集成，或直接使用 OpenTelemetry SDK/OTLP exporter；OTEL 路径需约定 `gen_ai.*`、`lunary.*` 和 thread/session 属性。[^lunary-otel]
 - 若使用当前源码运行，准备 Node.js/npm 和 PostgreSQL 15+；若用 Docker Compose，需 Enterprise license、私有镜像访问 token 和 PostgreSQL 15+。[^lunary-current-repository][^lunary-compose]
 
-### 接入过程
+### 最快验证路径
 
 1. 选择 SDK、框架集成或 OTEL 入口，配置 `LUNARY_API_URL`/OTLP endpoint 与认证 headers；为项目、Agent、成员、环境和原始会话定义稳定标识。
 2. 在一次任务开始时创建或恢复 thread；将 user、assistant、system、tool 消息写入 thread，并把 Agent、Chain、Tool、LLM run 通过 parent/message ID 关联。

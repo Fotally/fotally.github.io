@@ -1,3 +1,13 @@
+---
+title: "Mem0：面向 Agent 的可插拔长期记忆层"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Mem0
+role: primary
+brief_version: "1.0"
+---
+
 # Mem0：面向 Agent 的可插拔长期记忆层
 
 > **项目快照**：官方仓库 <https://github.com/mem0ai/mem0>｜核验日期 2026-09-03｜Stars 约 64.6k｜许可证 Apache-2.0｜仓库在核验日有提交，最新 Release 为 `ts-v3.1.8`（2026-09-02）。[^mem0-repository][^mem0-license][^mem0-release]
@@ -28,12 +38,24 @@ Mem0 是记忆基础设施，不是开发会话采集器，也不负责发现某
 
 Mem0 的主张是：把对话中的长期有用事实交给一个独立记忆层处理，在写入时提取/合并，在读取时按查询召回，而不是让每个 Agent 自己管理完整历史。其开源实现既可嵌入应用，也有带 API Key、Dashboard 和审计能力的自托管 FastAPI 服务。[^mem0-overview][^mem0-server]
 
+### Memory 实现方式
+
+调用方通过 `add(messages)` 送入对话，LLM 抽取候选事实，随后做实体识别、Embedding 和去重/合并，并按 `user_id`、`agent_id`、`run_id` 写入历史与向量库。`search` 将语义、BM25 和实体匹配结果融合后返回长期事实；更新和删除由记忆层完成，不保留完整 Agent transcript 作为主要检索对象。[^mem0-overview][^mem0-core]
+
 ### 关键设计选择
 
 - **多级作用域**：用户、会话和 Agent 维度的 ID 让同一 API 能覆盖个人偏好、一次任务上下文和跨 Agent 共享知识。[^mem0-repository]
 - **混合检索**：基础路径是向量检索；可选 NLP 依赖提供 BM25 关键词匹配和实体抽取，用语义、关键词和实体信号补足开发术语的精确召回。[^mem0-repository]
 - **模型与存储可替换**：官方文档列出多种 LLM、Embedding 和向量数据库配置，默认值是 OpenAI 模型，但不是架构上的唯一选择。[^mem0-models]
 - **库与服务并存**：小规模 POC 可以 `pip install mem0ai` 直接嵌入；团队共享可运行自托管服务，统一鉴权、Dashboard 和 API。[^mem0-overview][^mem0-server]
+
+### 向量化与模型接口核验
+
+Mem0 OSS 的语义记忆路径需要 Embedding；官方 README 明确把 OpenAI `text-embedding-3-small` 列为默认 Embedding 模型，并建议混合搜索至少使用 Qwen 600M 或可比模型。官方配置页没有把一个固定向量维度写死在 Memory API 中，但明确提醒更换模型造成的维度不匹配会导致搜索错误，因此向量集合必须与当前模型输出维度一致。[^mem0-repository][^mem0-configuration]
+
+Python OSS 支持 OpenAI、Gemini、Azure OpenAI、Ollama、Hugging Face、Vertex AI、AWS Bedrock 等 embedder；向量存储可选 Qdrant、pgvector、Chroma、Pinecone、Redis、Weaviate、Milvus、Elasticsearch 等。TypeScript OSS 的 embedder/向量存储枚举略有不同，不能把 Platform 的 Graph Memory 当作 OSS 能力。[^mem0-configuration]
+
+公司 API 可按 OpenAI-compatible 方式验证，DeepSeek 只有在网关提供 Embedding 端点和实际模型时才能接入；DeepSeek 聊天 API 本身不能替代 Embedding。中文开发会话不应直接沿用英文默认模型，应在建库前选择多语言 Embedding，并以模型输出维度配置向量库；切换模型后需重建相关集合。[^mem0-configuration][^mem0-repository]
 
 ### 代价与取舍
 
@@ -114,7 +136,7 @@ Mem0 直接覆盖“把整理后的业务知识和经验存起来、跨 Agent �
 - 若使用增强混合检索，安装 NLP extra 和对应 spaCy 模型；这会增加本地依赖。[^mem0-repository]
 - 为用户、项目、Agent、会话和原始会话文件建立稳定作用域 ID。
 
-### 接入过程
+### 最快验证路径
 
 1. 以库模式安装 `mem0ai`，或在 `server` 目录按官方说明执行 `make bootstrap`/`docker compose up -d`，得到 API 和 Dashboard。[^mem0-server]
 2. 配置公司 API 或 DeepSeek 的 Base URL、模型名、Embedding，以及向量/数据库后端；用 `Memory.add` 写入经授权的消息。[^mem0-models][^mem0-usage]
@@ -191,3 +213,5 @@ Mem0 没有声明原生读取各类 IDE/CLI 会话文件，也没有声明 Claud
 [^mem0-usage]: [Mem0 官方基本用法](https://github.com/mem0ai/mem0#basic-usage)
 [^mem0-models]: [Mem0 Supported LLMs and Embeddings](https://docs.mem0.ai/components/llm-models)
 [^mem0-paper]: [Mem0 技术论文](https://arxiv.org/abs/2504.19413)
+[^mem0-configuration]: [Mem0 OSS 配置：Embedder、向量存储与维度兼容性](https://github.com/mem0ai/mem0/blob/main/docs/open-source/configuration.mdx)
+[^mem0-core]: [Mem0 Memory 核心编排源码](https://github.com/mem0ai/mem0/blob/main/mem0/memory/main.py)

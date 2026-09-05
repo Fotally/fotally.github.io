@@ -1,3 +1,13 @@
+---
+title: "AgentOps：以 Session Replay 和 Agent Span 记录开发经验"
+kind: open-source-research-report
+status: completed
+topic: AI 开发会话收集
+project: AgentOps
+role: primary
+brief_version: "1.0"
+---
+
 # AgentOps：以 Session Replay 和 Agent Span 记录开发经验
 
 > **项目快照**：官方仓库 [AgentOps-AI/agentops](https://github.com/AgentOps-AI/agentops)｜核验日期 2026-09-03｜Stars 约 5.6k｜许可证：仓库 SDK 为 MIT，`app/` 自托管应用 README 标注 Elastic License 2.0（ELv2）｜最新可见 Release 为 0.4.21（2026-08-29），主分支随后仍有提交。[^agentops-repository][^agentops-license][^agentops-release]
@@ -120,7 +130,7 @@ AgentOps 天然匹配“把 Agent 执行组织成 Session 并回放”的目标�
 - 已有 AgentOps Cloud 账号，或部署自托管 API、Dashboard、Collector、ClickHouse 和 Supabase；自托管还要配置 JWT、数据库和 URL。[^agentops-selfhosting][^agentops-docker]
 - 对 Claude Code、Cursor、Codex 等本地 Agent，需将会话事件映射为 Session/LLM/Tool/Operation Span；官方没有声明本地 CLI transcript 自动导入。
 
-### 接入过程
+### 最快验证路径
 
 1. 安装 SDK，调用 `agentops.init()`；默认 Session 可自动启动，或关闭自动启动后按业务边界手动创建。[^agentops-core-concepts]
 2. 对 Agent 类、工作流和关键函数添加 `@agent`、`@workflow`、`@operation`/`@task` 等装饰器；支持的提供商则启用自动 instrumentation。[^agentops-decorators]
@@ -195,13 +205,6 @@ AgentOps 对“多 Agent 轨迹、层级 Span、Session Replay 和成本/错误�
 ### 否决风险
 
 如果公司要求整个平台必须采用 MIT/Apache 许可，或计划把修改后的 AgentOps app 作为对外竞争性托管服务，ELv2 是硬性风险。若仅作内部自托管的 Agent 可观测性层，当前未发现其他硬性否决项，但应先验证 Claude Code 事件映射和单机数据库运维边界。
-
-### 下一步验证项
-
-1. 选一条真实 Claude Code 会话，验证能否稳定映射为 Session、LLM、Tool、文件编辑和测试 Span。
-2. 对 prompt、completion、tool result、diff 和 secret 设定内容采集策略，测试大事件的存储与查询行为。
-3. 在一台服务器上按官方 Compose 组合启动 API、Dashboard、Collector、ClickHouse 和 PostgreSQL/Supabase，记录实际占用与备份恢复时间。
-4. 验证 `skill_version`、任务类型和评审标签能否贯穿回放，再将标记样本导出为 Skill 回归任务。
 
 ---
 

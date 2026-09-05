@@ -1,3 +1,13 @@
+---
+title: "OpenLLMetry：以 OpenTelemetry Instrumentation 作为跨 Agent 采集层"
+kind: open-source-research-report
+status: completed
+topic: AI 开发会话收集
+project: OpenLLMetry
+role: primary
+brief_version: "1.0"
+---
+
 # OpenLLMetry：以 OpenTelemetry Instrumentation 作为跨 Agent 采集层
 
 > **项目快照**：官方仓库 <https://github.com/traceloop/openllmetry>｜核验日期 2026-09-04｜Stars 约 7.4k｜许可证 Apache-2.0｜最近发布 v0.62.1（2026-06-28），仓库仍有持续提交和发布记录。[^openllmetry-repository][^openllmetry-license][^openllmetry-release]
@@ -119,7 +129,7 @@ OpenLLMetry 对“跨 Agent 采集层”和“可切换后端”天然匹配，�
 - 在应用中安装 `traceloop-sdk`，或直接安装所需的 `opentelemetry-instrumentation-*` 包并配置 OpenTelemetry `TracerProvider`。[^openllmetry-without-sdk]
 - 准备一个 OTLP 接收地址、认证 headers/TLS 和资源属性；该地址可以是公司 Collector、Traceloop Cloud 或其他兼容后端。[^openllmetry-configuration]
 
-### 接入过程
+### 最快验证路径
 
 1. 在 Agent/应用依赖中安装 SDK 与所需 instrumentation，初始化 `Traceloop.init()`，或者在已有 OTel Provider 上调用对应 `instrument()`。
 2. 对一次开发任务建立稳定的 `service.name`、`session.id`、`task.id` 和成员/项目属性；对未自动覆盖的 Agent loop、工具、文件操作和人工确认建立父子 Span。

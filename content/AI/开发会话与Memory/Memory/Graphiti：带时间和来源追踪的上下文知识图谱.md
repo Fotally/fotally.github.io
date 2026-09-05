@@ -1,3 +1,13 @@
+---
+title: "Graphiti：带时间和来源追踪的上下文知识图谱"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Graphiti
+role: primary
+brief_version: "1.0"
+---
+
 # Graphiti：带时间和来源追踪的上下文知识图谱
 
 > **项目快照**：官方仓库 <https://github.com/getzep/graphiti>｜核验日期 2026-09-03｜Stars 约 30.5k｜许可证 Apache-2.0｜仓库在核验日有提交，最新 Release `mcp-v1.1.0` 发布于 2026-09-01。[^graphiti-repository][^graphiti-license][^graphiti-release]
@@ -28,6 +38,10 @@ Graphiti 是图谱核心库和 MCP/REST 示例服务，不提供完整的团队�
 
 Graphiti 用“实体 + 带有效期的事实关系 + 原始 Episode + 可选本体”代替单一文档向量库，使 Agent 可以同时按语义、关键词、图关系和时间查询上下文。[^graphiti-repository]
 
+### Memory 实现方式
+
+每次 `add_episode` 先保留原始 `EpisodicNode`，再由 LLM 抽取 `EntityNode` 与带来源的 `EntityEdge`；边同时记录 `valid_at`、`invalid_at` 等时间状态。节点、边和 Episode 建立向量/全文索引，查询时融合语义、关键词、图遍历和重排；新事实通过失效旧边完成增量更新。[^graphiti-repository]
+
 ### 关键设计选择
 
 - **时间事实管理**：旧事实不直接删除，而是失效并保留历史，支持“现在为真”和“某个时间点为真”的查询。[^graphiti-repository]
@@ -35,6 +49,14 @@ Graphiti 用“实体 + 带有效期的事实关系 + 原始 Episode + 可选本
 - **增量图构建**：新数据实时整合，避免静态 GraphRAG 的批量重算。[^graphiti-repository]
 - **混合检索**：语义 Embedding、BM25 和图遍历组合，减少仅依赖 LLM 摘要重排。[^graphiti-repository]
 - **可规定也可学习的本体**：可用 Pydantic 预先定义实体/边类型，也可让结构随数据出现。[^graphiti-repository]
+
+### 向量化与模型接口核验
+
+Graphiti 的语义检索需要 Embedding；核心 `EmbedderConfig` 的默认维度来自 `EMBEDDING_DIM` 环境变量，未设置时为 1024。默认 OpenAI embedder 模型是 `text-embedding-3-small`，但核心代码只负责按配置截取/写入向量，不会替团队自动迁移已有索引。[^graphiti-embedder-client][^graphiti-openai-embedder]
+
+官方实现提供 OpenAI、Azure OpenAI、Google Gemini 和 Voyage embedder；README 示例明确展示了 OpenAI-compatible/Ollama 的 `nomic-embed-text`，并把维度设为 768。向量实际存储在所选 Neo4j、FalkorDB、Neptune 等图后端的向量索引中，写入和查询必须使用同一维度。[^graphiti-repository][^graphiti-embedder-gemini][^graphiti-embedder-voyage]
+
+公司 API 或 DeepSeek 只有在暴露 OpenAI-compatible `/v1/embeddings` 时才可作为 OpenAI embedder 的候选；DeepSeek 的常规聊天 API 不能推定提供 Embedding。中文场景应选择已验证的多语言模型，并在建库前固定模型与维度；Graphiti 官方未给出中文召回质量基线，需实测。改变维度还要同步图数据库索引配置，否则会出现向量长度不一致。[^graphiti-repository][^graphiti-embedder-client]
 
 ### 代价与取舍
 
@@ -122,7 +144,7 @@ Graphiti 的匿名遥测默认启用但可用 `GRAPHITI_TELEMETRY_ENABLED=false`
 - 支持结构化输出的 LLM 和 Embedding；OpenAI-compatible Base URL 可接 DeepSeek、公司服务或本地 Ollama/vLLM，但要确认 JSON Schema 兼容性。[^graphiti-repository]
 - 设计项目/成员/Agent/Skill/会话的 `group_id`、实体类型和权限映射。
 
-### 接入过程
+### 最快验证路径
 
 1. 用 Docker Compose 启动 Neo4j 或 FalkorDB，安装 `graphiti-core` 及对应 extra，并初始化索引/约束。[^graphiti-repository][^graphiti-quickstart]
 2. 将经用户授权的会话摘要、完整会话或结构化决策包装成 Episode，调用 `add_episode` 写入图谱；保留原始文件 ID、Skill 版本和分支元数据。[^graphiti-quickstart]
@@ -200,3 +222,7 @@ Graphiti 的匿名遥测默认启用但可用 `GRAPHITI_TELEMETRY_ENABLED=false`
 [^graphiti-server]: [Graphiti FastAPI Server README](https://github.com/getzep/graphiti/tree/main/server)
 [^graphiti-zep-boundary]: [Graphiti README 中 Graphiti 与 Zep 的边界](https://github.com/getzep/graphiti#graphiti-and-zep)
 [^graphiti-telemetry]: [Graphiti Telemetry 说明](https://github.com/getzep/graphiti#telemetry)
+[^graphiti-embedder-client]: [Graphiti EmbedderConfig：EMBEDDING_DIM 默认值](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/client.py)
+[^graphiti-openai-embedder]: [Graphiti OpenAI Embedder：默认模型与 Base URL](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/openai.py)
+[^graphiti-embedder-gemini]: [Graphiti Gemini Embedder：模型与输出维度配置](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/gemini.py)
+[^graphiti-embedder-voyage]: [Graphiti Voyage Embedder：模型配置](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/voyage.py)

@@ -1,3 +1,13 @@
+---
+title: "EverOS：以 Markdown、Episode 和 Skill 演化的本地 Memory"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: EverOS
+role: primary
+brief_version: "1.0"
+---
+
 # EverOS：以 Markdown、Episode 和 Skill 演化的本地 Memory
 
 > **项目快照**：官方仓库 <https://github.com/EverMind-AI/EverOS>｜核验日期 2026-09-04｜Stars 12,676｜许可证 Apache-2.0｜最近维护：`main` 分支最近提交为 2026-09-01。[^everos-repository][^everos-license][^everos-commits]
@@ -32,6 +42,10 @@ EverOS v1 明确面向个人 Agent 或小团队本地部署，明确不包含 10
 
 EverOS 的核心主张是“Markdown 是用户拥有的记忆事实源，索引和演化状态都可重建”。它把一次会话先固化为 Episode，再让 OME 根据策略生成事实、前瞻、画像、案例和 Skill；Agent 使用 LanceDB 的混合检索读取这些产物。[^everos-how-memory][^everos-architecture]
 
+### Memory 实现方式
+
+会话通过 Memory API 先写成带 frontmatter 的每日 Episode Markdown；Cascade/OME 随后从 Episode 异步派生 AtomicFact、Foresight、Profile、Agent Case 和 `SKILL.md`。Markdown 是可读事实源，SQLite/LanceDB 只保存可重建的元数据与检索索引，Agent 查询时通过关键词、向量和标量过滤召回对应记忆。[^everos-storage][^everos-ome]
+
 ### 关键设计选择
 
 - **Markdown-first**：每条业务记忆都有 YAML frontmatter 和明确路径，Episode 采用按日追加，Profile 采用单文件改写，Skill 采用目录加 `SKILL.md`（可带 `references/` 与 `scripts/`）。[^everos-storage]
@@ -39,6 +53,14 @@ EverOS 的核心主张是“Markdown 是用户拥有的记忆事实源，索引�
 - **同步入口、异步演化**：`/add`/`/flush` 保证 Episode 已落盘后返回，Cascade 负责增量索引，OME 通过事件和定时策略生成派生记忆。这样开发会话原文和后续经验提取拥有不同的一致性时点。[^everos-pipeline][^everos-api]
 - **双轨与正交作用域**：按 `app_id`、`project_id`、`user_id`、`agent_id`、`session_id` 组合隔离检索，用户知识和 Agent Skill 分开演化。[^everos-readme][^everos-api]
 - **离线 Reflection**：可选的 `reflect_episodes` 按周期合并相关 Episode，重新抽取事实，并用 `deprecated_by` 标记旧条目；不是每次查询都重新总结。[^everos-ome]
+
+### 向量化与模型接口核验
+
+EverOS 的基础关键词检索可以不启用 Embedding；向量检索、混合检索以及部分 Reflection/Skill extraction 路径才需要单独的 `[embedding]` provider。当前官方默认配置为 OpenAI-compatible 端点 `https://api.deepinfra.com/v1/openai`、模型 `Qwen/Qwen3-Embedding-4B`，并没有在配置中声明固定向量维度；服务返回的维度必须在 LanceDB 的索引空间中保持一致。[^everos-default-config][^everos-quickstart]
+
+Embedding 配置只有 `model`、`api_key`、`base_url` 以及超时、批量和并发参数，接口形态是 OpenAI-compatible。官方没有确认 EverOS 内置的模型目录、向量维度自动探测或独立的 Embedding provider 枚举；因此可接公司兼容 API 或 DeepSeek 兼容网关的前提是它们提供 `/v1/embeddings`，具体模型名、维度和中文效果需要实测。[^everos-config][^everos-default-config]
+
+向量落在本地 LanceDB，并与 BM25、标量过滤联合检索；改变 Embedding 模型或输出维度应重建 `.index/lancedb`，不能把不同向量空间混在同一索引中。官方没有给出默认模型对中文业务知识的质量结论，中文试点应优先使用已验证的多语言模型，并保留关键词检索作为对照。[^everos-how-memory][^everos-storage]
 
 ### 代价与取舍
 
@@ -136,7 +158,7 @@ EverOS README 中的“多 Agent 生态”表示已有集成或示例，并不�
 - 为每个应用和仓库规划 `app_id`、`project_id`，为成员、Agent、分支和会话建立稳定标识；将原始会话文件 ID放入消息元数据或外部索引。
 - 若多人通过服务器访问，准备反向代理/认证层，因为 EverOS 不提供内置认证。[^everos-api]
 
-### 接入过程
+### 最快验证路径
 
 1. 执行 `everos init --root <path>` 生成 `everos.toml` 与 `ome.toml`，并在 `[llm]`、`[embedding]`、`[rerank]` 中配置可切换的模型 Base URL 和凭据。[^everos-quickstart][^everos-config]
 2. 启动 `everos server start`，调用 `/health` 确认 LLM、Embedding、Rerank 和 Cascade 能力；只配置 LLM 时可先用关键词检索。[^everos-quickstart][^everos-api]
@@ -235,3 +257,4 @@ API 搜索是最终一致的：Episode 落盘后，LanceDB 还要等待 Cascade�
 [^everos-quickstart]: [EverOS QUICKSTART.md](https://github.com/EverMind-AI/EverOS/blob/main/QUICKSTART.md)
 [^everos-config]: [EverOS 配置示例](https://github.com/EverMind-AI/EverOS/blob/main/config.example.toml)
 [^everos-integrations]: [EverOS README：Ecosystem Integrations](https://github.com/EverMind-AI/EverOS#ecosystem-integrations)
+[^everos-default-config]: [EverOS 默认配置：Embedding 端点与模型](https://github.com/EverMind-AI/EverOS/blob/main/src/everos/config/default.toml)

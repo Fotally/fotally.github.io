@@ -1,3 +1,13 @@
+---
+title: "Hindsight：Retain、Recall、Reflect 的学习型 Agent Memory"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Hindsight
+role: primary
+brief_version: "1.0"
+---
+
 # Hindsight：Retain、Recall、Reflect 的学习型 Agent Memory
 
 > **项目快照**：官方仓库 <https://github.com/vectorize-io/hindsight>｜核验日期 2026-09-04｜Stars 22,259｜许可证 MIT｜最近维护：`main` 分支最近提交为 2026-09-03。[^hindsight-repository][^hindsight-license][^hindsight-commits]
@@ -32,6 +42,10 @@ Hindsight 是记忆服务和 Agent 集成层，不是公司的会话资产管理
 
 Hindsight 的核心主张是“让 Agent 学习，而不只是记住”：输入通过 Retain 变成可关联的事实和经历，Recall 负责可控检索，Reflect 负责基于已检索记忆进行更深层的综合；观察和心理模型在后台持续整理。[^hindsight-readme][^hindsight-operations]
 
+### Memory 实现方式
+
+`Retain` 将对话、文档或 Agent 事件抽取为事实、实体、关系、时间和经历，并按 Memory Bank 隔离；这些结构化记忆进入向量与全文检索路径。`Recall` 返回相关事实/经历，`Reflect` 以检索结果为依据生成综合回答，后台再把观察和心理模型整理为后续可检索记忆。[^hindsight-retain][^hindsight-operations]
+
 ### 关键设计选择
 
 - **三操作分离**：Retain、Recall、Reflect 分别承担写入、结构化记忆检索和带立场的综合回答。调用方可在低延迟查事实时只用 Recall，也可以在需要解释“为什么”时使用 Reflect。[^hindsight-operations]
@@ -39,6 +53,14 @@ Hindsight 的核心主张是“让 Agent 学习，而不只是记住”：输入
 - **混合检索**：语义向量、BM25 关键词、实体/时间/因果图和时间范围并行检索，随后用 reciprocal rank fusion 与交叉编码器重排。这样既保留业务词的精确匹配，也能处理自然语言表达差异。[^hindsight-recall]
 - **Bank 隔离与可配置性**：bank 是隔离的记忆单元，可承载项目或 Agent 范围，并有背景上下文和 Reflect 的 disposition 配置；这给项目级知识和个人记忆提供了边界。[^hindsight-banks]
 - **多入口接入**：Python、Node.js、Go、CLI、REST、MCP、LiteLLM/OpenAI/Anthropic wrapper 和编码 Agent 集成共享同一服务，使 Agent 适配集中在入口层。[^hindsight-clients][^hindsight-integrations]
+
+### 向量化与模型接口核验
+
+Hindsight 的 Recall 语义检索需要 Embedding；官方 Models 文档给出的默认模型是 `BAAI/bge-small-en-v1.5`，并说明 Embedding 与 Cross-Encoder 首次运行会从 Hugging Face 自动下载。官方页面没有确认默认模型的固定向量维度，因此部署时应以运行时返回维度和数据库 schema 为准。[^hindsight-models]
+
+向量模型与 LLM 是分开的配置面：LLM 支持 OpenAI、Anthropic、Gemini、Ollama、LM Studio、DeepSeek、OpenAI-compatible 和 LiteLLM 等 provider；Embedding 默认走本地 Hugging Face 模型，官方没有在该页确认一个可直接切换的 DeepSeek Embedding provider。公司 API 可以作为 LLM 或兼容 Embedding 端点，但 DeepSeek 常规聊天接口不能推定支持 Embedding。[^hindsight-models][^hindsight-configuration]
+
+向量、全文、实体和时间索引最终由 PostgreSQL/pgvector 等存储服务承载；中文项目不宜直接沿用英文默认模型，应改用经过中文评测的本地或兼容远程模型，并在建库前固定模型和维度。更换 Embedding 后需要全量重建向量数据，Cross-Encoder 也应作为独立的重排模型验证，不要把 LLM 名称当成 Embedding 能力。[^hindsight-storage][^hindsight-models]
 
 ### 代价与取舍
 
@@ -61,14 +83,14 @@ flowchart LR
 
 ### 阶段说明
 
-| 阶段 | 接收什么 | 做什么 | 产生的状态或产物 | 证据 |
-| --- | --- | --- | --- | --- |
-| 输入与 Retain | 事实、对话、文档或 Agent 事件 | 通过 API/SDK 接受内容，LLM 提取关键事实、时间、实体和关系 | 待规范化的记忆事实与经历 | [^hindsight-retain] |
-| 规范化与建模 | 抽取结果及已有实体 | 归一化实体，建立关系和时间序列，并写入稀疏/稠密表示与元数据 | 世界事实、经历、实体关系和搜索索引 | [^hindsight-readme][^hindsight-retain] |
-| 后台学习 | 同一 bank 中的相关事实 | 合并相关事实为证据支持的观察，刷新心理模型或知识页 | 带证据的观察、心理模型或可投影 Markdown 的知识页 | [^hindsight-observations][^hindsight-mental-models] |
-| Recall | 查询、bank、过滤器和预算 | 并行执行语义、关键词、图和时间检索，再融合和重排 | 相关记忆列表及其元数据 | [^hindsight-recall] |
-| Reflect | 查询与召回上下文 | 对既有记忆作更深分析，形成 disposition-aware 的答案或新连接 | 解释、建议或项目风险/经验总结 | [^hindsight-reflect] |
-| 外部消费 | 记忆结果、原始会话 ID 和 Skill 版本 | 由外部治理层关联证据，生成候选 Skill 差异并走 Git 评审 | 可审计的候选 PR 和验证结果 | 调研判断 |
+| 阶段         | 接收什么                    | 做什么                                     | 产生的状态或产物                      | 证据                                                  |
+| ---------- | ----------------------- | --------------------------------------- | ----------------------------- | --------------------------------------------------- |
+| 输入与 Retain | 事实、对话、文档或 Agent 事件      | 通过 API/SDK 接受内容，LLM 提取关键事实、时间、实体和关系     | 待规范化的记忆事实与经历                  | [^hindsight-retain]                                 |
+| 规范化与建模     | 抽取结果及已有实体               | 归一化实体，建立关系和时间序列，并写入稀疏/稠密表示与元数据          | 世界事实、经历、实体关系和搜索索引             | [^hindsight-readme][^hindsight-retain]              |
+| 后台学习       | 同一 bank 中的相关事实          | 合并相关事实为证据支持的观察，刷新心理模型或知识页               | 带证据的观察、心理模型或可投影 Markdown 的知识页 | [^hindsight-observations][^hindsight-mental-models] |
+| Recall     | 查询、bank、过滤器和预算          | 并行执行语义、关键词、图和时间检索，再融合和重排                | 相关记忆列表及其元数据                   | [^hindsight-recall]                                 |
+| Reflect    | 查询与召回上下文                | 对既有记忆作更深分析，形成 disposition-aware 的答案或新连接 | 解释、建议或项目风险/经验总结               | [^hindsight-reflect]                                |
+| 外部消费       | 记忆结果、原始会话 ID 和 Skill 版本 | 由外部治理层关联证据，生成候选 Skill 差异并走 Git 评审       | 可审计的候选 PR 和验证结果               | 调研判断                                                |
 
 ### 关键状态与产物
 
@@ -130,7 +152,7 @@ Hindsight 原生匹配共享业务知识、开发经历检索、多 Agent 接入
 - 为项目建立稳定的 bank ID 和元数据字段，用于区分仓库、分支、Agent、成员、会话以及 Skill 版本。
 - 在 Claude Code、Codex、Cursor 等 Agent 中选择官方编码 Agent 集成、MCP，或直接使用 SDK/REST；未列出的 Agent 需要归一化事件适配器。[^hindsight-coding-agents][^hindsight-integrations]
 
-### 接入过程
+### 最快验证路径
 
 1. 使用 `docker run`/Docker Compose 启动 API；开发测试可直接使用内置 pg0，生产路径配置外部 PostgreSQL 并启用 pgvector。[^hindsight-quickstart][^hindsight-installation]
 2. 配置 `HINDSIGHT_API_LLM_PROVIDER`、模型、API key 和 base URL；公司 OpenAI-compatible API 使用 `openai` provider 指向自定义 endpoint，DeepSeek 使用 `deepseek` provider。Embedding 不要默认复用 DeepSeek，因为官方说明 DeepSeek 不提供 embeddings endpoint。[^hindsight-configuration][^hindsight-models]

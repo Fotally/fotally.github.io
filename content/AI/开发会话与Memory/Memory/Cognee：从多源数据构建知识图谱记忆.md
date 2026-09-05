@@ -1,3 +1,13 @@
+---
+title: "Cognee：从多源数据构建知识图谱记忆"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Cognee
+role: primary
+brief_version: "1.0"
+---
+
 # Cognee：从多源数据构建知识图谱记忆
 
 > **项目快照**：官方仓库 <https://github.com/topoteretes/cognee>｜核验日期 2026-09-03｜Stars 约 30.3k｜许可证 Apache-2.0｜仓库在核验日有提交；官方 README 当前提供 Docker 镜像、Compose profiles 和 Claude Code Memory 插件。[^cognee-repository][^cognee-license]
@@ -28,12 +38,24 @@ Cognee 负责数据摄取、记忆构建、召回和 Agent 集成；它不自动
 
 Cognee 把记忆设计为可运行的数据管道：输入数据经过 add/cognify/improve 形成图谱和索引，查询阶段自动路由到会话缓存或图谱搜索。它的目标是让不同 Agent 共享同一知识基础，而不是把所有历史文本每次原样放进上下文。[^cognee-repository]
 
+### Memory 实现方式
+
+输入先经 `add`/`remember` 写入数据集；`cognify` 再完成切块、实体关系抽取、本体约束和 Embedding，分别落入图结构与向量索引。带 `session_id` 的内容先进入快速会话记忆，`recall/search` 按会话或长期图谱召回，`improve` 根据反馈异步修正派生知识。[^cognee-repository]
+
 ### 关键设计选择
 
 - **DAG/管道式知识构建**：`add`、`cognify`、`search`/`recall`、`improve` 等操作分离摄取、结构化和反馈改进。[^cognee-repository]
 - **会话记忆与永久图谱分层**：session memory 追求快速读写，长期图谱保存可跨会话复用的事实和关系。[^cognee-repository]
 - **图 + 向量 + 本体**：同时支持语义检索和关系推理，并通过 ontology grounding 组织业务域知识。[^cognee-repository]
 - **插件/MCP 多接入面**：提供 API、MCP Server、TypeScript/Rust 客户端和 Claude Code 插件，降低不同 Agent 的接入成本。[^cognee-repository][^cognee-mcp]
+
+### 向量化与模型接口核验
+
+Cognee 的默认语义检索路径需要 Embedding。当前配置类默认 `embedding_provider=openai`、`embedding_model=openai/text-embedding-3-large`，并在能从 LiteLLM/FastEmbed 识别模型时自动解析维度；无法识别时回退到 3072 维。官方配置接口也直接给出了 FastEmbed 的 `BAAI/bge-small-en-v1.5`/384 维示例。[^cognee-embedding-config][^cognee-config]
+
+官方配置支持 OpenAI、FastEmbed、Ollama、LiteLLM 和 OpenAI-compatible 端点；官方模板示例包括 OpenAI `text-embedding-3-large`/3072 维、Ollama `nomic-embed-text:latest`/768 维。LanceDB 是默认向量后端，亦可切换 pgvector、Turso，或安装社区适配器接入 Qdrant、Weaviate、Milvus、ChromaDB。[^cognee-env][^cognee-vector-db]
+
+公司 OpenAI-compatible API 可以通过 `EMBEDDING_ENDPOINT`、模型名和维度接入；DeepSeek 当前不能直接假定可作为 Embedding provider，需确认公司网关是否暴露 `/v1/embeddings` 以及目标模型的输出维度。中文资料不应沿用默认英文模型而不做评测；更换模型或维度前必须清理并重建向量索引，否则会产生形状不匹配。[^cognee-env][^cognee-embedding-config]
 
 ### 代价与取舍
 
@@ -121,7 +143,7 @@ Cognee 是本组中最直接覆盖“开发会话采集 + 会话记忆 + 永久�
 - 选择默认轻量存储或 Compose profile 中的 Postgres/PGVector、Neo4j；规划数据集、项目、成员和会话 ID。
 - Claude Code 场景安装官方 `cognee-memory` 插件；其他 Agent 可使用 MCP 或 API 接入。[^cognee-claude][^cognee-mcp]
 
-### 接入过程
+### 最快验证路径
 
 1. 用 `uv pip install cognee` 或 Docker Compose 启动 API；设置 `LLM_API_KEY`、模型 Base URL 等配置。[^cognee-repository][^cognee-providers]
 2. 通过 `remember`/CLI 或插件写入文档、选定会话和工具轨迹；长期知识运行 add+cognify+improve，短期会话指定 `session_id`。[^cognee-repository]
@@ -198,3 +220,7 @@ Claude Code 插件在启动时连接 Cognee，在每次 prompt 前注入相关�
 [^cognee-claude]: [Cognee Integrations 官方仓库（Claude Code 插件）](https://github.com/topoteretes/cognee-integrations/tree/main/integrations/claude-code)
 [^cognee-providers]: [Cognee LLM Provider 文档](https://docs.cognee.ai/configuration/llm-providers)
 [^cognee-server]: [Cognee Server/访问控制说明](https://github.com/topoteretes/cognee/tree/main/deployment)
+[^cognee-embedding-config]: [Cognee EmbeddingConfig 与维度解析](https://github.com/topoteretes/cognee/blob/main/cognee/infrastructure/databases/vector/embeddings/config.py)
+[^cognee-config]: [Cognee 配置 API：Embedding provider/model/dimensions](https://github.com/topoteretes/cognee/blob/main/cognee/api/v1/config/config.py)
+[^cognee-env]: [Cognee 官方环境变量模板：Embedding 示例](https://github.com/topoteretes/cognee/blob/main/.env.template)
+[^cognee-vector-db]: [Cognee 向量数据库支持与适配器](https://github.com/topoteretes/cognee/blob/main/cognee/infrastructure/databases/vector/supported_databases.py)

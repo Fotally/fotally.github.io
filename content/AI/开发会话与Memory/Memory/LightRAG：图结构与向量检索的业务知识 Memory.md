@@ -1,3 +1,13 @@
+---
+title: "LightRAG：图结构与向量检索的业务知识 Memory"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: LightRAG
+role: primary
+brief_version: "1.0"
+---
+
 # LightRAG：图结构与向量检索的业务知识 Memory
 
 > **项目快照**：官方仓库 <https://github.com/HKUDS/LightRAG>｜核验日期 2026-09-04｜Stars 39,362｜许可证 MIT｜main 分支最近提交 2026-09-03；README 记录 2026-07 的 Smart Heading 等持续更新。[^lightrag-repository][^lightrag-license][^lightrag-maintenance]
@@ -32,6 +42,10 @@ LightRAG 是 RAG/知识图谱基础设施，不是完整的 Agent Memory：它�
 
 LightRAG 的核心是“双层知识”：一层是由实体和关系组成的知识图，另一层是文本块、实体和关系的向量索引。查询时按问题提取关键词，在图上定位局部/全局上下文，再与向量结果合并交给 LLM 生成答案。[^lightrag-readme][^lightrag-operate]
 
+### Memory 实现方式
+
+文档或会话先切成文本块，LLM 从中抽取实体和关系并写入图存储，同时为文本块、实体和关系生成 Embedding；关键词索引补充精确匹配。查询阶段根据 local/global 模式在图、向量和关键词索引中取回结果，合并上下文后交给 LLM 生成回答，知识更新通过增量插入和索引维护完成。[^lightrag-readme][^lightrag-operate]
+
 ### 关键设计选择
 
 - **图与向量双存储**：图保留语义依赖和跨文档关系，向量保留相似文本、实体描述和关系描述，兼顾精确实体查询与语义召回。[^lightrag-readme][^lightrag-storage]
@@ -39,6 +53,14 @@ LightRAG 的核心是“双层知识”：一层是由实体和关系组成的�
 - **增量写入和选择性删除**：文档插入可异步排队；删除文档时根据来源重建仍存活的实体、关系和向量，适合不断更新的知识库。[^lightrag-core][^lightrag-file-pipeline]
 - **存储后端可替换**：默认 JSON/KV、NetworkX 和 NanoVectorDB 适合测试；生产可用 PostgreSQL、MongoDB、OpenSearch，或用 Neo4j/Milvus/Qdrant 等分别承载图和向量。[^lightrag-readme][^lightrag-storage]
 - **模型绑定可切换**：官方列出 OpenAI/OpenAI-compatible、Ollama、Gemini、Bedrock、Azure 等 LLM，以及多种 Embedding；角色可拆分为 EXTRACT、QUERY、KEYWORD、VLM。[^lightrag-readme][^lightrag-provider]
+
+### 向量化与模型接口核验
+
+LightRAG 的文档、实体和关系语义检索都依赖 Embedding；服务通过 `EMBEDDING_BINDING`、`EMBEDDING_MODEL`、`EMBEDDING_DIM` 和 `EMBEDDING_TOKENIZER` 配置向量化函数。官方说明这些参数是部署者提供的模型配置，并没有为所有 binding 声明一个统一默认模型或统一维度；OpenAI-compatible 示例中常见 `text-embedding-3-small`、`bge-m3` 或多语言 E5，但实际维度必须以所选服务返回值为准。[^lightrag-provider][^lightrag-readme]
+
+官方 binding 覆盖 `openai`/`azure_openai`（兼容 OpenAI `/embeddings`）、`ollama`、`gemini`、`jina` 和 `voyageai` 等；Ollama/Gemini 还有专门的 provider 参数，向量存储可落本地 NanoVectorDB、PostgreSQL/pgvector、Milvus、Qdrant、OpenSearch 等。改变模型或维度后，官方提供 `rebuild_vdb` 清理并重建所有向量存储。[^lightrag-provider][^lightrag-storage][^lightrag-readme]
+
+公司 API 可走 OpenAI-compatible binding，DeepSeek 只有在提供 `/v1/embeddings` 的兼容网关中才可作为 Embedding；DeepSeek 聊天 API不能直接替代。中文项目应选择多语言模型并固定 `EMBEDDING_DIM`，同时验证 tokenizer、查询/文档前缀和后端索引上限；官方未给出中文效果保证，需用业务会话回放实测。[^lightrag-provider][^lightrag-readme]
 
 ### 代价与取舍
 
@@ -128,7 +150,7 @@ LightRAG 的 MIT 许可证覆盖仓库代码，但数据库、模型、MinerU/Do
 - 决定默认小规模文件存储，或配置 PostgreSQL/pgvector、Neo4j、Milvus、Qdrant、MongoDB、OpenSearch 等生产后端；四类存储分别对应 KV、向量、图和文档状态。[^lightrag-storage]
 - 为每个项目分配 workspace，并为会话摘要、决策文档、Skill 候选记录保存来源 ID、文件路径、版本和时间。
 
-### 接入过程
+### 最快验证路径
 
 1. 使用 `pip install "lightrag-hku[api]"`、源码 `uv sync` 或 `docker compose up` 启动 Server；复制 `env.example` 到 `.env`。[^lightrag-readme][^lightrag-docker]
 2. 设置 LLM/Embedding provider、Base URL、模型、Embedding 维度、查询模式和存储后端；若使用中文资料，应选择合适的多语言 Embedding，并在建库前固定模型。
