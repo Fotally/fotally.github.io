@@ -1,3 +1,13 @@
+---
+title: "Helicone：以 AI Gateway 代理和请求日志沉淀会话"
+kind: open-source-research-report
+status: completed
+topic: AI 开发会话收集
+project: Helicone
+role: primary
+brief_version: "1.0"
+---
+
 # Helicone：以 AI Gateway 代理和请求日志沉淀会话
 
 > **项目快照**：官方仓库 `Helicone/helicone`｜核验日期 2026-09-03｜Stars 6,131｜许可证 Apache-2.0｜主分支于 2026-08-31 仍有更新；项目同时提供 Gateway、Agent tracing、会话日志和自托管 Compose。[^helicone-repository][^helicone-license][^helicone-readme]
@@ -118,7 +128,7 @@ Apache-2.0 适合内部自托管和改造，但官方文档把生产 Helm chart 
 - Agent 为请求设置 session、user、property 等元数据；
 - Docker Compose 及持久化卷。
 
-### 接入过程
+### 最快验证路径
 
 1. 按官方 Compose 启动 Supabase、ClickHouse、MinIO、Jawn、Worker 和 Web。[^helicone-architecture]
 2. 将 Agent 的 API base URL 指向 Gateway，或添加 Helicone SDK/header。
@@ -193,13 +203,6 @@ Helicone 对统一模型 API、请求记录和 session replay 有直接能力，
 ### 否决风险
 
 若试点要求“一台服务器上少于三个服务”或必须无代理改动地采集 Claude Code 全部操作，Helicone 存在硬性不匹配。若只需统一 LLM 请求和经验分析，当前未发现其他硬性否决项。
-
-### 下一步验证项
-
-1. 用公司 API 和 DeepSeek 各跑一条请求链，验证路由与成本字段。
-2. 测试 session properties 是否能稳定关联 Skill commit。
-3. 估算一周开发会话写入 ClickHouse/MinIO 的容量。
-4. 评估是否值得为 Claude Code 增加本地事件上传器。
 
 ---
 

@@ -1,3 +1,13 @@
+---
+title: "Phoenix：以 OpenTelemetry 轨迹和评估数据集分析 Agent 会话"
+kind: open-source-research-report
+status: completed
+topic: AI 开发会话收集
+project: Phoenix
+role: primary
+brief_version: "1.0"
+---
+
 # Phoenix：以 OpenTelemetry 轨迹和评估数据集分析 Agent 会话
 
 > **项目快照**：官方仓库 `Arize-ai/phoenix`｜核验日期 2026-09-03｜Stars 约 11.3k｜许可证 Elastic License 2.0（ELv2）｜最新 Phoenix 发布为 v20.6.0（2026-09-03），仓库仍有持续提交。[^phoenix-repository][^phoenix-license][^phoenix-release]
@@ -118,7 +128,7 @@ ELv2 允许内部使用、修改和部署，但限制把软件作为向第三方
 - 统一 project、repository、session、agent、skill_version 属性；
 - 评估阶段可访问公司模型 API 或 DeepSeek API。
 
-### 接入过程
+### 最快验证路径
 
 1. 通过 `pip install arize-phoenix`、`uvx` 或官方容器启动 Phoenix。[^phoenix-install]
 2. 为应用 Agent 和工具安装对应 OpenInference instrumentation，配置 OTLP endpoint；Claude Code CLI 则安装 `coding-harness-tracing` 插件并设置 `PHOENIX_ENDPOINT`。[^phoenix-claude-code]
@@ -188,13 +198,6 @@ Phoenix 以标准 OTel/OpenInference 表达多 Agent 轨迹，单机启动轻，
 ### 否决风险
 
 若公司要求 Apache/MIT 许可或计划把平台作为对外托管服务，ELv2 是硬性风险。仅用于内部单机试点时，当前未发现其他硬性否决项。
-
-### 下一步验证项
-
-1. 用官方 `coding-harness-tracing` 插件验证一条 Claude Code 会话的 turn、工具、子 Agent、token 成本和 `session_id` 是否完整到达 Phoenix；再验证历史 JSONL 到 OpenInference span 的字段映射。
-2. 测试长 prompt、工具输出和代码 diff 的存储上限。
-3. 在 SQLite 单机模式下测量 1,000 条会话的查询和备份。
-4. 验证 Dataset 实验结果能否按 Skill commit 进行对比。
 
 ---
 

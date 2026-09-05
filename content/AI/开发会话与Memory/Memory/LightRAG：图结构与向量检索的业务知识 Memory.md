@@ -1,3 +1,13 @@
+---
+title: "LightRAG：图结构与向量检索的业务知识 Memory"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: LightRAG
+role: primary
+brief_version: "1.0"
+---
+
 # LightRAG：图结构与向量检索的业务知识 Memory
 
 > **项目快照**：官方仓库 <https://github.com/HKUDS/LightRAG>｜核验日期 2026-09-04｜Stars 39,362｜许可证 MIT｜main 分支最近提交 2026-09-03；README 记录 2026-07 的 Smart Heading 等持续更新。[^lightrag-repository][^lightrag-license][^lightrag-maintenance]
@@ -140,7 +150,7 @@ LightRAG 的 MIT 许可证覆盖仓库代码，但数据库、模型、MinerU/Do
 - 决定默认小规模文件存储，或配置 PostgreSQL/pgvector、Neo4j、Milvus、Qdrant、MongoDB、OpenSearch 等生产后端；四类存储分别对应 KV、向量、图和文档状态。[^lightrag-storage]
 - 为每个项目分配 workspace，并为会话摘要、决策文档、Skill 候选记录保存来源 ID、文件路径、版本和时间。
 
-### 接入过程
+### 最快验证路径
 
 1. 使用 `pip install "lightrag-hku[api]"`、源码 `uv sync` 或 `docker compose up` 启动 Server；复制 `env.example` 到 `.env`。[^lightrag-readme][^lightrag-docker]
 2. 设置 LLM/Embedding provider、Base URL、模型、Embedding 维度、查询模式和存储后端；若使用中文资料，应选择合适的多语言 Embedding，并在建库前固定模型。

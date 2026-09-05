@@ -1,0 +1,42 @@
+kind: open-source-research-manifest
+status: completed
+topic: AI 开发会话与 Memory
+updated_at: 2026-09-05
+layout: published-content-with-control-manifest
+notes: >-
+  The published reports remain under content/ so Quartz keeps their existing URLs.
+  This manifest maps the formal research topics and roles without duplicating pages.
+topics:
+  - name: AI Memory
+    brief: docs/open-source-research/ai-memory/research-brief.md
+    primary_reports:
+      - content/AI/开发会话与Memory/Memory/Mem0：面向Agent的可插拔长期记忆层.md
+      - content/AI/开发会话与Memory/Memory/Graphiti：带时间和来源追踪的上下文知识图谱.md
+      - content/AI/开发会话与Memory/Memory/Cognee：从多源数据构建知识图谱记忆.md
+      - content/AI/开发会话与Memory/Memory/Letta Code：带持续学习记忆的开发 Agent Harness.md
+      - content/AI/开发会话与Memory/Memory/Hindsight：Retain、Recall、Reflect 的学习型 Agent Memory.md
+      - content/AI/开发会话与Memory/Memory/EverOS：以 Markdown、Episode 和 Skill 演化的本地 Memory.md
+      - content/AI/开发会话与Memory/Memory/Supermemory：事实演化、用户画像与混合检索 Memory.md
+      - content/AI/开发会话与Memory/Memory/LightRAG：图结构与向量检索的业务知识 Memory.md
+      - content/AI/开发会话与Memory/Memory/Memobase：以 Profile 与事件时间线构建可控用户 Memory.md
+      - content/AI/开发会话与Memory/Memory/MemU：面向主动记忆与多 Agent 的记忆编排.md
+    supplemental_reports:
+      - content/AI/开发会话与Memory/Memory/Zep：托管 Context Graph 生态与开源边界案例.md
+  - name: AI 开发会话收集
+    brief: docs/open-source-research/ai-session-collection/research-brief.md
+    primary_reports:
+      - content/AI/开发会话与Memory/个人会话收集/Entire CLI：用 Git Checkpoint 连接 AI 会话与代码变更.md
+      - content/AI/开发会话与Memory/个人会话收集/CloudCLI UI：跨 Agent 本地会话发现与预览.md
+      - content/AI/开发会话与Memory/个人会话收集/OpenLIT（以 OpenTelemetry、ClickHouse 和 SDK 采集 Agent 会话）.md
+      - content/AI/开发会话与Memory/个人会话收集/Langfuse：以 Trace、Session 和评估闭环沉淀 Agent 会话.md
+      - content/AI/开发会话与Memory/个人会话收集/Phoenix：以 OpenTelemetry 轨迹和评估数据集分析 Agent 会话.md
+      - content/AI/开发会话与Memory/个人会话收集/Opik：Agent Trace、评估和 CI 反馈沉淀开发经验.md
+      - content/AI/开发会话与Memory/个人会话收集/AgentOps（以 Session Replay 和 Agent Span 记录开发经验）.md
+      - content/AI/开发会话与Memory/个人会话收集/OpenLLMetry：以 OpenTelemetry Instrumentation 作为跨 Agent 采集层.md
+      - content/AI/开发会话与Memory/个人会话收集/claude-mem：面向 Claude Code 的本地会话记忆与压缩检索.md
+      - content/AI/开发会话与Memory/个人会话收集/Helicone：以 AI Gateway 代理和请求日志沉淀会话.md
+    supplemental_reports:
+      - content/AI/开发会话与Memory/个人会话收集/Lunary：会话日志、反馈与开源边界案例.md
+summary:
+  published_report: content/AI/开发会话与Memory/开源项目调研.md
+  validation_notes: docs/open-source-research/ai-development-sessions-memory/validation-notes.md

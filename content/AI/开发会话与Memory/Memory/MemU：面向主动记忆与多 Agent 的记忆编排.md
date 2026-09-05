@@ -1,6 +1,16 @@
+---
+title: "MemU：面向主动记忆与多 Agent 的记忆编排"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: MemU
+role: primary
+brief_version: "1.0"
+---
+
 # MemU：面向主动记忆与多 Agent 的记忆编排
 
-> **项目快照**：官方仓库 <https://github.com/NevaMind-AI/memU>｜核验日期 2026-09-04｜Stars 约 14.3k｜许可证 Apache-2.0｜最近发布/维护状态：`v2.0.0-beta.0` 于 2026-07-23 发布；仓库页面显示 2026-07-31 仍有更新记录。[^memu-repository][^memu-license][^memu-release]
+> **项目快照**：官方仓库 <https://github.com/NevaMind-AI/memU>｜核验日期 2026-09-05｜Stars 约 14.4k｜许可证 Apache-2.0。最新稳定发布为 `v1.5.1`（2026-03-23），最新标记版本为 prerelease `v2.0.0-beta.0`（2026-07-23）；本报告同时参考截至 2026-09-04 的 `main` commit `385bdb3`。发布标签与持续演进的 `main` 不能无条件视为同一版本。[^memu-repository][^memu-license][^memu-release][^memu-main-commit]
 
 > **需求画像**：目标是在 Claude Code 等开发 Agent 之间保存项目业务知识、技术决策和经过验证的开发经验，并把有价值的经历转化为可复用 Skill。必须优先支持单机/内网部署、可切换模型接口和多个 Agent；原始会话是否上传、候选 Skill 的人工评审与最终发布由外部治理流程控制。
 
@@ -16,15 +26,15 @@ MemU 面向需要跨会话、跨 Agent 和跨设备复用个人记忆的 Agent �
 
 开发 Agent 的会话通常保存在本地目录，任务完成后其中的约束、踩坑和有效操作难以被后续会话复用。MemU 通过宿主适配器扫描会话历史，把一次会话加工成可供 Agent 判断的 job，而不是要求开发者手工复制整段聊天记录。[^memu-claude-bridge]
 
-单纯保存原始日志会带来上下文过长、检索噪声和难以阅读的问题。MemU 让宿主 Agent 先决定是否值得保存、应创建或修改哪个 Markdown Skill，再由 MemoryService 负责保存、向量化和检索已产生的文件。换言之，记忆提炼主要由宿主 Agent 完成，MemU 核心服务不做聊天式总结。[^memu-readme][^memu-service]
+单纯保存原始日志会带来上下文过长、检索噪声和难以阅读的问题。在 host bridging 和 developer memorize 的 Skill 自演化阶段，MemU 让外部 Agent 先决定是否值得保存、应创建或修改哪个 Markdown Skill，再由 MemoryService 负责保存、向量化和检索已产生的文件。MemoryService 本身是 embedding-only，不做聊天式总结；但 v2.0.0-beta.0 同时加入了多 provider 的 LLM/VLM、富文档、音频和视频处理能力，不能把这一限制扩展为整个 memU 包都没有 LLM/VLM 处理组件。[^memu-readme][^memu-service][^memu-developer]
 
 跨 Agent 复用还需要稳定的接入缝隙。MemU 将“record”（读取宿主会话、生成自演化 job）和“inject”（在宿主指令文件中加入检索规则）分成两条 seam，并为不同宿主提供独立二进制或 generic adapter。[^memu-skill][^memu-readme]
 
 ### 问题边界
 
-MemU 不是完整的团队会话管理平台。它提供宿主本地日志的发现、记忆文件提交和检索，但没有在核心 CLI 中提供成员目录、统一 Web 会话浏览、上传审批、SSO 或组织级审计。官方自托管说明将本地模式定位为 private、single-device，并要求配置 Embedding key。[^memu-readme]
+MemU 不是完整的团队会话管理平台。它提供宿主本地日志的发现、记忆文件提交和检索，但没有在本地核心路径中提供成员目录、统一 Web 会话浏览、上传审批、SSO 或组织级审计；官方自托管说明将本地模式定位为 private、single-device，并要求配置 Embedding key。当前 Cloud 路径还对 workspace resource 有单独边界：Cloud 接受该输入以保持 API 兼容，但不会持久化或检索 workspace resources。[^memu-readme][^memu-cloud-adr]
 
-它也不保证“原始会话文件”就是长期记忆的最终产物。Claude Code 适配器会读取 `~/.claude/projects/<project>/<session>.jsonl`，但自演化任务的输出是 memory/skill Markdown；是否保存原文、原文如何归档以及来源如何关联，需要在 MemU 外部建立规则。[^memu-readme][^memu-claude-bridge]
+它也不保证“原始会话文件”就是长期记忆的最终产物。Claude Code 适配器会按游标读取 `~/.claude/projects/<project>/<session>.jsonl` 的新增片段，经过清洗后作为临时提炼输入；当前路径不会自动持久化或回放完整原始 transcript。是否保存原文、原文如何归档以及来源如何关联，需要在 MemU 外部建立规则。[^memu-readme][^memu-claude-bridge][^memu-claude-sessions]
 
 ## 2. 设计的核心思路
 
@@ -34,7 +44,7 @@ MemU 的核心判断是：让连接的 Agent 负责“理解和写作”，让�
 
 ### Memory 实现方式
 
-宿主 Agent 通过 adapter/job 从会话中判断要保存的事实或 Skill，并写成 Markdown 文件；`MemoryService` 为文件和片段建立元数据、作用域与 Embedding，保存到 SQLite 或 PostgreSQL/pgvector。后续 Agent 用 `retrieve` 做向量/过滤检索，返回原文件内容；MemoryService 不负责聊天式总结或事实判断。[^memu-service][^memu-readme]
+宿主 Agent 通过 adapter/job 从会话中判断要保存的事实或 Skill，并写成 Markdown 文件；`MemoryService` 为文件和片段建立元数据、作用域与 Embedding，保存到 SQLite 或 PostgreSQL/pgvector。后续 Agent 用 `retrieve` 做向量检索，返回原文件内容；MemoryService 不负责聊天式总结或事实判断。对外部输入也可使用 developer memorize API，把规范化消息、tool call 和 tool result 交给 prepare/commit 流程；该流程仍把原始 transcript 作为临时提炼输入，而不是原文归档。[^memu-service][^memu-readme][^memu-developer][^memu-input]
 
 ### 关键设计选择
 
@@ -43,19 +53,19 @@ MemU 的核心判断是：让连接的 Agent 负责“理解和写作”，让�
 - **Agent 主导的 Skill 演化**：job 会让 Agent 读取已有 Skill，并选择不做任何修改、patch 既有 Skill 或创建新 Skill；提交阶段只把 Agent 真正写入或修改的文件送回 MemU。[^memu-readme][^memu-claude-bridge]
 - **渐进检索但不增加查询 LLM**：`progressive_retrieve` 对文件和资源层使用向量相似度排名，当前配置说明明确表示不做路由、充分性判断或查询摘要；结果可按 track 过滤，例如 `memory` 或 `skill`。[^memu-settings][^memu-agentic]
 - **存储后端可替换**：in-memory 适合测试，SQLite 是本地默认路径，PostgreSQL + pgvector 用于并发访问和较大规模存储；数据库工厂和服务组合根将存储与 Embedding 客户端分离。[^memu-readme][^memu-service][^memu-settings]
-- **混合检索方向已在架构决策中明确**：最新 ADR 说明三条 memory line 共用记录、切片、Embedding、混合搜索和 Markdown 渲染内核；L2 切片以 Embedding + BM25 单次融合检索，结果向上汇总到 L1 文件。该 ADR 同时说明这是当前架构演进记录，具体实现应以目标版本源码为准。[^memu-adr]
+- **混合检索是架构提案，不应当作当前实现**：ADR 0007（2026-07-01，状态为 Proposed）提议三条 memory line 共用记录、切片、Embedding、混合搜索和 Markdown 渲染内核，并规划 L2 的 Embedding + BM25 融合；截至核验的源码，`progressive_retrieve` 仍以向量检索为主，不能据此宣称 BM25 已在当前 MemoryService 路径落地。[^memu-adr][^memu-agentic]
 
 ### 向量化模型、接口与检索后端
 
 MemU 的核心 MemoryService 是 Embedding-only：写入或查询时调用 Embedding client，不调用 LLM/chat。默认 provider 是 `openai`，默认模型是 `text-embedding-3-small`；当前 `defaults.py` 还登记了以下 provider 和默认模型：[^memu-service][^memu-embedding-defaults]
 
-| provider | 官方默认 Embedding 模型 | 官方默认 endpoint/API key 环境变量 | 备注 |
-| --- | --- | --- | --- |
-| `openai` | `text-embedding-3-small` | `https://api.openai.com/v1` / `OPENAI_API_KEY` | 默认配置 |
-| `jina` | `jina-embeddings-v3` | `https://api.jina.ai/v1` / `JINA_API_KEY` | 使用 provider 默认 endpoint |
-| `voyage` | `voyage-3.5` | `https://api.voyageai.com/v1` / `VOYAGE_API_KEY` | README 明确列为可选 provider |
-| `doubao` | `doubao-embedding-large-text-250515` | `https://ark.cn-beijing.volces.com` / `ARK_API_KEY` | 火山引擎兼容路径 |
-| `openrouter` | `openai/text-embedding-3-small` | `https://openrouter.ai` / `OPENROUTER_API_KEY` | 通过 OpenRouter 路由 Embedding |
+| provider     | 官方默认 Embedding 模型                    | 官方默认 endpoint/API key 环境变量                          | 备注                         |
+| ------------ | ------------------------------------ | --------------------------------------------------- | -------------------------- |
+| `openai`     | `text-embedding-3-small`             | `https://api.openai.com/v1` / `OPENAI_API_KEY`      | 默认配置                       |
+| `jina`       | `jina-embeddings-v3`                 | `https://api.jina.ai/v1` / `JINA_API_KEY`           | 使用 provider 默认 endpoint    |
+| `voyage`     | `voyage-3.5`                         | `https://api.voyageai.com/v1` / `VOYAGE_API_KEY`    | README 明确列为可选 provider     |
+| `doubao`     | `doubao-embedding-large-text-250515` | `https://ark.cn-beijing.volces.com` / `ARK_API_KEY` | 火山引擎兼容路径                   |
+| `openrouter` | `openai/text-embedding-3-small`      | `https://openrouter.ai` / `OPENROUTER_API_KEY`      | 通过 OpenRouter 路由 Embedding |
 
 配置通过 `MEMU_EMBED_PROVIDER`、`MEMU_EMBED_MODEL`、`MEMU_BASE_URL` 和 `MEMU_API_KEY` 覆盖默认值；Python API 也接受命名 `embedding_profiles`。Embedding client 有 `sdk` 和 `httpx` 两种 transport，后者通过通用 HTTP 请求和 endpoint override 适配列出的 provider。[^memu-readme][^memu-settings][^memu-gateway]
 
@@ -89,12 +99,17 @@ flowchart LR
   L --> M[Agent 上下文]
 ```
 
+### 开发者 memorize API
+
+除宿主 adapter 外，当前开发者接口提供 `memu memorize prepare <payload.json|-> --json` 与 `memu memorize commit --json`。调用方可以把选定会话转换为 `MemorizeInput`（schema 1.0），其中包含 message、tool call 和 tool result；memory projection 主要使用消息，skill projection 使用全部事件。prepare 仍由外部 Agent 执行生成或修改文件，成功 commit 后临时 transcript projection 会被清理，因此该入口允许调用方控制会话边界，但不等于 MemU 保存完整原始 transcript。[^memu-developer][^memu-input][^memu-lifecycle]
+
 ### 阶段说明
 
 | 阶段 | 接收什么 | 做什么 | 产生的状态或产物 | 证据 |
 | --- | --- | --- | --- | --- |
-| 会话发现 | Claude Code 等宿主的本地日志 | 适配器读取新文件或新增行，并维护每个宿主的会话游标 | 待处理会话集合、session manifest | [^memu-readme][^memu-claude-bridge] |
-| Job 准备 | 新会话、现有 memory/skill 快照 | `prepare` 按会话生成自包含 job，写入宿主工作目录 | `jobs/1.txt`、`jobs/2.txt` 等 | [^memu-claude-bridge] |
+| 会话发现 | Claude Code 等宿主的本地日志 | 适配器按游标读取新增文件或新增行，并维护宿主会话状态 | 待处理会话集合、session manifest；不是完整原始 transcript 归档 | [^memu-readme][^memu-claude-bridge][^memu-claude-sessions] |
+| 外部会话输入 | 调用方选定并规范化的 `MemorizeInput` | `memorize prepare` 校验 payload，生成临时提炼输入和 job | schema 1.0 payload、临时 transcript projection | [^memu-developer][^memu-input][^memu-lifecycle] |
+| Job 准备 | 新会话、现有 memory/skill 快照 | `prepare` 按会话生成自包含 job，写入宿主工作目录 | `jobs/1.txt`、`jobs/2.txt` 等 | [^memu-claude-bridge][^memu-developer] |
 | Agent 自演化 | job 指令、相关 Skill、代码工作区 | 连接的 Agent 判断是否提炼记忆、修改 Skill 或跳过 | Markdown memory、`SKILL.md`、资源描述 | [^memu-readme][^memu-claude-bridge] |
 | 提交与索引 | Agent 实际变更的文件 | `commit` 计算快照差异，调用 `commit_results` 写入文件/资源并生成 Embedding | RecallFile、RecallFileSegment、资源记录及向量 | [^memu-agentic][^memu-service] |
 | 未来检索 | 查询文本、scope、top_k | 查询向量与文件/资源层相似度排名，按 track 和作用域过滤 | 相关 memory/skill 文件内容 | [^memu-settings][^memu-agentic] |
@@ -102,11 +117,11 @@ flowchart LR
 
 ### 关键状态与产物
 
-- **宿主 session manifest**：记录已读取的会话位置，使定时 `prepare` 只处理新增内容。Claude Code 适配器的日志来源是 `~/.claude/projects/<project>/<session>.jsonl`；Codex、Cursor 等宿主有各自路径。[^memu-readme][^memu-claude-bridge]
+- **宿主 session manifest**：记录已读取的会话位置，使定时 `prepare` 只处理新增内容。Claude Code 适配器的日志来源是 `~/.claude/projects/<project>/<session>.jsonl`；Codex、Cursor 等宿主有各自路径。它记录增量处理状态，不代表原始 transcript 已被完整归档。[^memu-readme][^memu-claude-bridge][^memu-claude-sessions]
 - **自演化 job**：位于 `~/.memu/hosts/<host>/jobs/` 的编号文件，携带本次任务需要的路径和上下文。job 允许“什么也不做”，因此没有新知识时不会强行生成记忆。[^memu-claude-bridge]
-- **RecallFile 与 RecallFileSegment**：文件是可返回的较粗粒度记忆对象，片段是用于 Embedding/排名的搜索单元；服务入口会把提交、渐进检索和文件列表暴露给宿主。[^memu-service][^memu-agentic]
-- **track 与作用域**：文件可按 `memory`、`skill` 等 track 区分；`UserConfig` 默认含 `user_id`、`agent_id`，查询 filter 会依据配置的 user model 校验。项目级隔离不能仅凭 README 的“跨 Agent”宣传推定，需要设计并传递稳定的 project scope。[^memu-settings][^memu-agents]
-- **Embedding profile**：可为不同用途配置命名 Embedding profile；profile 包含 provider、Base URL、API key、模型、批大小和 transport。变更模型时必须考虑历史向量与新向量维度/语义空间的一致性。[^memu-settings][^memu-gateway]
+- **RecallFile 与 RecallFileSegment**：文件是可返回的较粗粒度记忆对象，片段是用于 Embedding/排名的搜索单元；服务入口会把提交、渐进检索和文件列表暴露给宿主。`commit_results.resource` 可携带 workspace resource，但当前 Cloud 后端接受该字段仅为保持 API 兼容，不会持久化或检索 workspace resource。[^memu-service][^memu-agentic][^memu-cloud-adr]
+- **track 与作用域**：文件可按 `memory`、`skill` 等 track 区分；`UserConfig` 默认含 `user_id`、`agent_id`，查询 filter 会依据配置的 user model 校验。项目级隔离不能仅凭 README 的“跨 Agent”宣传推定，需要设计并传递稳定的 project scope；host CLI 的 `retrieve` 主要接受 query，复杂的 `where` 过滤属于 Python API/自建 wrapper 能力。[^memu-settings][^memu-agents]
+- **Embedding profile**：可为不同用途配置命名 Embedding profile；profile 包含 provider、Base URL、API key、模型、批大小和 transport。`RecallFile`、`RecallFileSegment` 和 `Resource` 模型保存 embedding 数组，但不保存 provider、model 或 dimension 元数据；变更模型时必须由外部流程管理历史索引重建和维度兼容。[^memu-settings][^memu-gateway][^memu-models]
 
 ### 最终输出
 
@@ -120,11 +135,11 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | 项目业务知识长期保存 | 必须 | memory Wiki/Markdown、文件和片段索引 | [^memu-readme][^memu-agentic] | 满足 | 需由 Agent 在 job 中提炼；业务知识目录和审核规则需团队定义 |
 | 技术决策和开发经验可检索 | 必须 | skill track、memory track、向量检索和作用域过滤 | [^memu-settings][^memu-readme] | 部分满足 | 存储与召回具备，但决策类型、验证证据和来源字段需在 Skill 规范中补充 |
-| 接收完整开发会话 | 必须 | 宿主适配器读取 Claude Code 等 JSONL/SQLite 会话，并按游标生成 job | [^memu-readme][^memu-claude-bridge] | 部分满足 | 可读取会话，但长期产物主要是提炼后的 Markdown；原始会话归档、上传审批和完整回放需外部实现 |
-| 支持多个 Agent | 必须 | Claude Code、Codex、Cursor、OpenClaw、Hermes、WorkBuddy、Cola、generic adapter | [^memu-readme][^memu-hosts] | 满足 | 具体宿主的日志格式、权限和调度能力仍需分别验证；generic adapter 需要调用方提供适配逻辑 |
+| 接收完整开发会话 | 必须 | 宿主适配器增量读取 Claude Code 等 JSONL/SQLite 会话；developer memorize 也可接收规范化事件 | [^memu-readme][^memu-claude-bridge][^memu-developer][^memu-input] | 部分满足 | 支持读取或临时处理会话，不等于接收、保留或回放完整原始 transcript；原始归档、上传审批和完整回放需外部实现 |
+| 支持多个 Agent | 必须 | Claude Code、Codex、Cursor、OpenClaw、Hermes、WorkBuddy、Cola、generic adapter | [^memu-readme][^memu-hosts] | 满足 | 能力依赖宿主、平台和版本且并不对称；例如 Linux Codex 当前偏 retrieval、部分宿主能力仍未验证，generic adapter 需要调用方提供适配逻辑 |
 | 模型 API 可切换 | 必须 | Embedding provider、model、Base URL、API key、SDK/httpx 可配置 | [^memu-readme][^memu-settings][^memu-embedding-defaults] | 部分满足 | OpenAI-compatible Embedding 可接公司 API；DeepSeek Embedding 未列为内置 provider，需验证兼容端点或另选模型 |
 | 单机/一台服务器部署 | 必须 | CLI + SQLite/brute-force cosine；可选 PostgreSQL + pgvector | [^memu-readme][^memu-settings] | 满足 | 本地单机路径简单；团队共享服务器需要补认证和客户端/服务边界，官方未提供完整组织服务方案 |
-| 用户主动选择原始会话上传 | 期望 | 默认由本地宿主适配器定时读取；没有强制上传审批 UI | [^memu-claude-bridge][^memu-readme] | 部分满足 | 可以把 adapter 调度改为手动运行或在 `prepare` 前增加选择器，但不是现成核心能力 |
+| 用户主动选择原始会话上传 | 期望 | 没有现成预览/审批 UI，但调用方可将选定边界转换为 `MemorizeInput` 后调用 developer memorize | [^memu-developer][^memu-input][^memu-claude-bridge] | 部分满足 | 选择、授权和原始上传治理仍需外部实现；canonical payload 只作为临时提炼输入，不能替代原文归档 |
 | Skill 候选可追溯、人工发布 | 必须 | Skill Markdown 可提交、可读、可由 Git 管理；job 输出可允许不变更 | [^memu-readme][^memu-claude-bridge] | 部分满足 | 没有内置证据卡片、评审状态、Git PR、回归测试和发布门禁，需要外部治理 |
 | 隐私、权限和跨项目隔离 | 必须 | 本地模式、宿主级工作目录、user/agent scope filter | [^memu-readme][^memu-settings][^memu-agents] | 部分满足 | 本地隐私路径较清晰；共享 PostgreSQL 的成员、项目授权、审计、删除和加密需自建 |
 
@@ -145,39 +160,39 @@ MemU 直接覆盖“本地 Agent 会话进入记忆管线、Skill Markdown 形�
 | PostgreSQL + pgvector 后端 | 有可选安装路径 | 无必须商业版声明 | PostgreSQL、pgvector、`memu-cli[postgres]` | [^memu-readme] |
 | OpenAI/Jina/Voyage/豆包/OpenRouter Embedding provider | 有 provider backend 和配置 | 外部 provider 费用或配额不属于 memU | 各 provider API 与 API key | [^memu-embedding-defaults][^memu-gateway] |
 | Claude Code/Codex/Cursor 等 record/inject | 有宿主 adapter 和安装说明 | 无必须商业版声明 | 对应 Agent CLI、会话日志、权限/调度器 | [^memu-readme][^memu-claude-bridge] |
-| Agent 自演化、LLM 提炼、Skill 写作 | job 与宿主流程开源；实际 LLM 推理由宿主 Agent 完成 | MemU Cloud 可提供云端体验，但本地流程可使用自有 Agent | Claude/其他可运行宿主、其凭据和模型 | [^memu-readme][^memu-claude-bridge] |
-| 团队认证、SSO、成员/项目权限、审批、审计 | 未提供为核心能力 | README 未声明某个商业版可直接替代 | 反向代理、SSO、权限和审计系统 | [^memu-readme][^memu-agents] |
-| 中央 Web 会话浏览与原始文件归档 | 未确认；当前公开核心接口是 CLI/Python/adapter | Cloud 有 online view 入口，但云端边界和数据控制需另行评估 | 自建对象存储、数据库和 UI | [^memu-readme] |
+| Agent 自演化、LLM 提炼、Skill 写作 | host bridging 与 developer memorize 的 job 流程开源；该阶段实际写作由外部 Agent/executor 完成 | MemU Cloud 可提供云端体验，但本地流程可使用自有 Agent | Claude/其他可运行宿主、其凭据和模型 | [^memu-readme][^memu-claude-bridge][^memu-developer] |
+| 团队认证、SSO、成员/项目权限、审批、审计 | 未提供为本地核心能力 | Cloud/服务端边界需按版本和服务条款另行核验 | 反向代理、SSO、权限和审计系统 | [^memu-readme][^memu-agents] |
+| 中央 Web 会话浏览与原始文件归档 | 当前公开核心接口主要是 CLI/Python/adapter；workspace resource 的 Cloud 持久化/检索未提供 | Cloud 接受 resource 以保持 API 兼容，但不持久化或检索该类 resource | 自建对象存储、数据库和 UI | [^memu-readme][^memu-cloud-adr] |
 
 ### 边界判断
 
 “跨设备、跨 Agent”描述的是 MemU 记忆层和宿主 adapter 生态，不代表仓库已经提供面向团队的集中会话管理服务。自托管模式的公开路径是本地 store（默认 SQLite）或 PostgreSQL DSN；README 没有把一个多租户 Web API、权限中心或会话审批 UI 列为本地最小部署的一部分。[^memu-readme]
 
-此外，`MemoryService` 明确不做 LLM/chat 调用。不能把 MemU 的“自动提炼 Skill”理解为 MemoryService 内部自带一个独立摘要模型；实际判断和写作由连接的 Agent 按 job 完成，因而模型切换和提示治理主要属于宿主 Agent 层。[^memu-service][^memu-claude-bridge]
+此外，在 host bridging 和 developer memorize 的记忆/Skill 自演化路径中，`MemoryService` 明确不做 LLM/chat 调用；实际判断和写作由连接的 Agent/executor 按 job 完成，因而模型切换和提示治理主要属于宿主 Agent 层。这一限定不代表整个 memU v2 包没有 LLM/VLM 处理组件。[^memu-service][^memu-claude-bridge][^memu-developer]
 
 ## 6. 用户如何接入和使用
 
 ### 接入前提
 
-- 安装 `memu-cli`，使 `memu` 及宿主 adapter 二进制位于非交互 shell 的 `PATH`；官方安装入口使用 `pip install --upgrade memu-cli`，也支持 npm launcher 或 uvx。[^memu-readme][^memu-skill]
+- 安装 `memu-cli`，使 `memu` 及宿主 adapter 二进制位于非交互 shell 的 `PATH`；目标版本需按 release 或 `main` 的 Python 要求选择运行时（`v2.0.0-beta.0` 的 `pyproject.toml` 要求 Python 3.13+，当前 `main` 的要求可能不同）。官方安装入口使用 `pip install --upgrade memu-cli`，也支持 npm launcher 或 uvx。[^memu-readme][^memu-skill][^memu-beta-pyproject]
 - 选择本地或 Cloud memory mode；本地模式需要一个可用的 Embedding API key。默认 Embedding 是 OpenAI `text-embedding-3-small`，也可通过 provider/model/base URL 配置切换。[^memu-readme][^memu-embedding-defaults]
 - 对 Claude Code，准备可被调度器以 headless 方式调用的 `claude` CLI、可读取的 `~/.claude/projects/.../*.jsonl`，以及允许 adapter 修改 `~/.claude/CLAUDE.md` 和访问 `~/.memu` 的权限。桌面应用登录状态不能直接替代独立 CLI 的 headless 凭据。[^memu-claude-bridge]
 - 若多人共享 PostgreSQL，规划 `user_id`、`agent_id`、project scope、数据库凭据、备份和访问控制；不要把一个可写共享 DSN 直接暴露给所有开发者。
 
-### 接入过程
+### 最快验证路径
 
 1. 安装 `memu-cli`，运行对应 adapter 的 `init`/`doctor`，选择 local backend，并设置 `MEMU_DB`、`MEMU_EMBED_PROVIDER`、`MEMU_EMBED_MODEL`、`MEMU_BASE_URL` 和 API key。[^memu-readme][^memu-skill]
-2. 选择宿主 adapter，例如 `memu-claude-code`；阅读并执行 `docs install`，让它注册 scheduled bridging task，并把 retrieve 规则写入 `CLAUDE.md`。官方 Claude Code 流程使用 `prepare → self-evolve → commit`。[^memu-skill][^memu-claude-bridge]
-3. 先以手动方式运行一次 `prepare`，检查识别到的会话范围和 job 内容；对需要保护的试点会话，可以在这里增加人工挑选/确认，再让 Agent 处理 job。
-4. 让连接的 Agent 逐个读取 job：读取既有 memory/skill，提炼可复用内容，必要时修改或创建 Markdown；把原始会话 ID、项目、Skill 名称和验证任务写入 frontmatter 或外部索引。
-5. 运行 `commit`，确认变更进入本地 store；再用 `retrieve "..."` 检查 Embedding、向量库和注入链路。切换 Embedding provider 后，应使用相同数据集做回归检索，并确认维度与历史索引兼容。
-6. 将生成的 Skill 复制或同步到团队 Skill 仓库，经过来源核验、人工评审、Git PR 和固定任务回归后再发布；该门禁不属于 MemU 自动流程。
+2. 选择宿主 adapter，例如 `memu-claude-code`；执行 `<adapter> docs install` 完成安装，使用 `<adapter> docs task` 查看调度说明，并在支持的宿主上使用 `<adapter> schedule install` 注册任务。Claude Code 流程使用 `prepare → self-evolve → commit`。[^memu-skill][^memu-claude-bridge]
+3. 如果调用方已经有选定的会话边界，也可以将 message、tool call 和 tool result 转换为 `MemorizeInput`，运行 `memu memorize prepare <payload.json|-> --json`，再由外部 Agent 执行 job 并运行 `memu memorize commit --json`。[^memu-developer][^memu-input][^memu-lifecycle]
+4. 让连接的 Agent 读取 job 和既有 memory/skill，必要时修改或创建 Markdown；把会话 ID、项目、Skill 名称和验证任务写入 frontmatter 或外部索引。[^memu-claude-bridge][^memu-developer]
+5. 用 `retrieve "..."` 检查 Embedding、向量库和注入链路；切换 Embedding provider 后，应使用相同数据集回归检索，并确认维度与历史索引兼容。[^memu-settings][^memu-agentic]
+6. 将生成的 Skill 交给团队 Skill 仓库的来源核验、人工评审、Git PR 和固定任务回归门禁；该门禁不属于 MemU 自动流程。
 
 ### 日常使用方式
 
-宿主侧定期扫描增量会话，`prepare` 产生 job；Agent 可以选择不创建记忆，也可以写入新的 memory 或 Skill。未来任务开始时，注入到宿主指令文件中的规则会要求 Agent 调用 `memu-<host> retrieve`，相关内容随后加入当前上下文。[^memu-readme][^memu-claude-bridge]
+宿主侧定期扫描增量会话，`prepare` 产生 job；Agent 可以选择不创建记忆，也可以写入新的 memory 或 Skill。调用方也可以通过 developer memorize API 显式提交规范化事件。未来任务开始时，注入到宿主指令文件中的规则会要求 Agent 调用 `memu-<host> retrieve`，相关内容随后加入当前上下文。[^memu-readme][^memu-claude-bridge][^memu-developer]
 
-如果只需要手工检索，可以直接使用 `memu-claude-code retrieve`、`memu-codex retrieve` 或 generic `memu-agent retrieve`。如果需要按项目、成员或 Agent 隔离，调用方应给 MemoryService 配置 UserConfig 和 `where` 条件，不能只依赖文件名约定。[^memu-readme][^memu-settings][^memu-agents]
+如果只需要手工检索，可以直接使用 `memu-claude-code retrieve`、`memu-codex retrieve` 或 generic `memu-agent retrieve`。host CLI 的 `retrieve` 主要接受 query；如果需要按项目、成员或 Agent 隔离并使用 `where` 条件，调用方应在 Python API 或自建 wrapper 中配置 UserConfig，不能只依赖文件名约定。[^memu-readme][^memu-settings][^memu-agents]
 
 ### 接入限制
 
@@ -198,7 +213,7 @@ DeepSeek 作为聊天模型能否承担自演化步骤取决于能否通过 gene
 | 宿主 bridging scheduler | record 场景必需；手动试点可暂时省略 | 定期运行 prepare、Agent self-evolve、commit | job、manifest、bridge log | 调用宿主 CLI 和 memU adapter | [^memu-claude-bridge] |
 | SQLite metadata/vector store | 本地默认必需 | 保存文件、片段、作用域和向量；brute-force cosine | `MEMU_DB` 指向的 `.sqlite3` | MemoryService 写入和查询 | [^memu-readme][^memu-settings] |
 | PostgreSQL + pgvector | 可选 | 并发访问和较大规模的 metadata/vector 存储 | PostgreSQL 数据目录、备份 | 替换本地 SQLite；`MEMU_DB` 使用 PostgreSQL DSN | [^memu-readme][^memu-settings] |
-| Embedding provider | 必需 | 为记忆文件/片段和查询生成 dense vector | 通常只保存向量与 provider 元数据，API 状态在外部 | commit 和 retrieve 调用 provider | [^memu-service][^memu-embedding-defaults] |
+| Embedding provider | 必需 | 为记忆文件/片段和查询生成 dense vector | 保存 embedding 数组；RecallFile 模型不含 provider、model、dimension 元数据 | commit 和 retrieve 调用 provider，模型迁移需外部管理 | [^memu-service][^memu-embedding-defaults][^memu-models] |
 | Agent LLM provider | Skill 提炼时必需 | 读取 job、总结会话、写 Markdown Skill | provider 状态不由 MemoryService 持久化 | 宿主 Agent 直接调用；不是 MemoryService 内部调用 | [^memu-service][^memu-claude-bridge] |
 | 外部认证/网关/审计 | 团队共享时必需 | 成员身份、项目授权、TLS、审计、原始会话上传控制 | 网关配置、审计日志和凭据 | 位于开发者 adapter 与共享数据库/自建 API 之间 | [^memu-readme][^memu-agents] |
 
@@ -221,7 +236,7 @@ DeepSeek 作为聊天模型能否承担自演化步骤取决于能否通过 gene
 
 ### 适配结论
 
-**条件匹配。** MemU 对“多个 Agent 共享可读记忆、从开发会话提炼 Skill、单机快速启动、Embedding provider 可切换”的核心思路高度贴合；但团队集中会话管理、DeepSeek Embedding 兼容性、权限审计、原始会话人工上传和 Skill 评审发布都需要外部补齐。若试点先验证 Claude Code 本地会话到 Skill 候选的闭环，它是值得优先做 POC 的候选；若目标是立即提供组织级会话平台，则不能把 MemU 单独视为完整方案。
+**条件匹配。** MemU 对“多个 Agent 共享可读记忆、从开发会话提炼 Skill、单机快速启动、Embedding provider 可切换”的核心思路高度贴合；但团队集中会话管理、DeepSeek Embedding 兼容性、权限审计、原始会话人工上传和 Skill 评审发布都需要外部补齐。它适合作为 Claude Code 本地会话到 Skill 候选的试点评估对象；若目标是立即提供组织级会话平台，则不能把 MemU 单独视为完整方案。
 
 ### 已满足能力
 
@@ -249,7 +264,7 @@ DeepSeek 作为聊天模型能否承担自演化步骤取决于能否通过 gene
 
 ### 否决风险
 
-当前未发现必须否决 MemU POC 的硬性风险。需要在进入团队共享阶段前重点验证两件事：一是目标 Embedding API（尤其 DeepSeek/公司网关）能否稳定提供兼容接口，二是共享数据库前是否已经补齐项目级权限和原始会话授权，否则会把一个适合个人/单机的记忆 sidecar 误当成组织会话平台。
+当前未发现必须否决 MemU 进入单机试点评估的硬性风险。进入团队共享场景前，仍需确认目标 Embedding API（尤其 DeepSeek/公司网关）能否稳定提供兼容接口，以及共享数据库是否已补齐项目级权限和原始会话授权；否则会把一个适合个人/单机的记忆 sidecar 误当成组织会话平台。
 
 ---
 
@@ -267,3 +282,11 @@ DeepSeek 作为聊天模型能否承担自演化步骤取决于能否通过 gene
 [^memu-gateway]: [memU 官方 Embedding gateway：SDK/httpx client](https://github.com/NevaMind-AI/memU/blob/main/src/memu/embedding/gateway.py)
 [^memu-adr]: [memU 官方 ADR 0007：三条 memory line 与混合检索](https://github.com/NevaMind-AI/memU/blob/main/docs/adr/0007-three-independent-memory-lines-wiki-graph.md)
 [^memu-agents]: [memU 官方 AGENTS.md：服务边界、后端和作用域约束](https://github.com/NevaMind-AI/memU/blob/main/AGENTS.md)
+[^memu-main-commit]: [memU main 最新提交（截至 2026-09-04）](https://github.com/NevaMind-AI/memU/commit/385bdb30cda7f5265368934b8008ce2b73283283)
+[^memu-developer]: [memU 官方 Developer Memorize API](https://github.com/NevaMind-AI/memU/blob/main/docs/developer.md)
+[^memu-input]: [memU MemorizeInput schema](https://github.com/NevaMind-AI/memU/blob/main/src/memu/app/memorize/input.py)
+[^memu-lifecycle]: [memU Memorize 生命周期源码](https://github.com/NevaMind-AI/memU/blob/main/src/memu/app/memorize/lifecycle.py)
+[^memu-claude-sessions]: [memU Claude Code transcript 处理源码](https://github.com/NevaMind-AI/memU/blob/main/src/memu/hosts/claude_code/sessions.py)
+[^memu-models]: [memU 数据库模型源码](https://github.com/NevaMind-AI/memU/blob/main/src/memu/database/models.py)
+[^memu-cloud-adr]: [memU ADR 0012：Cloud backend 与 workspace resource 边界](https://github.com/NevaMind-AI/memU/blob/main/docs/adr/0012-cloud-backed-agentic-backend.md)
+[^memu-beta-pyproject]: [memU v2.0.0-beta.0 的 Python 版本要求](https://github.com/NevaMind-AI/memU/blob/v2.0.0-beta.0/pyproject.toml)

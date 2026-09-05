@@ -1,3 +1,13 @@
+---
+title: "Langfuse：以 Trace、Session 和评估闭环沉淀 Agent 会话"
+kind: open-source-research-report
+status: completed
+topic: AI 开发会话收集
+project: Langfuse
+role: primary
+brief_version: "1.0"
+---
+
 # Langfuse：以 Trace、Session 和评估闭环沉淀 Agent 会话
 
 > **项目快照**：官方仓库 `langfuse/langfuse`｜核验日期 2026-09-03｜Stars 34,156｜许可证 MIT（`ee/` 等目录另有商业许可）｜主分支于 2026-09-03 仍有更新，仓库提供 v3 自托管文档。[^langfuse-repository][^langfuse-license][^langfuse-self-host]
@@ -116,7 +126,7 @@ Langfuse 对“采集、检索、标注、评估 Agent 会话”直接匹配。�
 - 统一的 Trace、Session、Agent、项目和 Skill 版本字段；
 - 对外部模型 API 的网络和凭据配置。
 
-### 接入过程
+### 最快验证路径
 
 1. 用官方 Docker Compose 启动 Langfuse，并创建项目和 API key。[^langfuse-self-host]
 2. 在 Agent 适配器中把用户消息、模型响应、工具调用、文件变更、测试结果映射为 Observation。
@@ -193,13 +203,6 @@ Langfuse 已具备跨 Agent 的 Trace/Session、检索、标注和评估基础�
 ### 否决风险
 
 如果试点要求“一条命令、单进程、无需数据库”的极轻量部署，Langfuse 不合适；如果允许单机多容器并需要评估闭环，则当前未发现硬性否决项。
-
-### 下一步验证项
-
-1. 用一个 Claude Code JSONL 会话映射 Trace、工具 Observation 和 Session。
-2. 验证敏感字段在 SDK/OTel 发送前的本地过滤能力。
-3. 在单台服务器上测试 Compose 的磁盘增长和查询延迟。
-4. 将三类会话失败标签导出为 Dataset，验证是否能支撑 Skill 回归任务。
 
 ---
 

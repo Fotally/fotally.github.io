@@ -1,3 +1,13 @@
+---
+title: "Cognee：从多源数据构建知识图谱记忆"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Cognee
+role: primary
+brief_version: "1.0"
+---
+
 # Cognee：从多源数据构建知识图谱记忆
 
 > **项目快照**：官方仓库 <https://github.com/topoteretes/cognee>｜核验日期 2026-09-03｜Stars 约 30.3k｜许可证 Apache-2.0｜仓库在核验日有提交；官方 README 当前提供 Docker 镜像、Compose profiles 和 Claude Code Memory 插件。[^cognee-repository][^cognee-license]
@@ -133,7 +143,7 @@ Cognee 是本组中最直接覆盖“开发会话采集 + 会话记忆 + 永久�
 - 选择默认轻量存储或 Compose profile 中的 Postgres/PGVector、Neo4j；规划数据集、项目、成员和会话 ID。
 - Claude Code 场景安装官方 `cognee-memory` 插件；其他 Agent 可使用 MCP 或 API 接入。[^cognee-claude][^cognee-mcp]
 
-### 接入过程
+### 最快验证路径
 
 1. 用 `uv pip install cognee` 或 Docker Compose 启动 API；设置 `LLM_API_KEY`、模型 Base URL 等配置。[^cognee-repository][^cognee-providers]
 2. 通过 `remember`/CLI 或插件写入文档、选定会话和工具轨迹；长期知识运行 add+cognify+improve，短期会话指定 `session_id`。[^cognee-repository]

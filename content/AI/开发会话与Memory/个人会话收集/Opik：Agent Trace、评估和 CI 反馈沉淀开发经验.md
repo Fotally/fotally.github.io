@@ -1,3 +1,13 @@
+---
+title: "Opik：以 Agent Trace、评估和 CI 反馈沉淀开发经验"
+kind: open-source-research-report
+status: completed
+topic: AI 开发会话收集
+project: Opik
+role: primary
+brief_version: "1.0"
+---
+
 # Opik：以 Agent Trace、评估和 CI 反馈沉淀开发经验
 
 > **项目快照**：官方仓库 <https://github.com/comet-ml/opik>｜核验日期 2026-09-04｜Stars 21.8k｜许可证 Apache-2.0｜最近发布/维护状态：GitHub Releases 页面显示 2.2.12 为 Latest，发布于 2026-07-30，仓库持续提交。[^opik-repository][^opik-license][^opik-release]
@@ -134,7 +144,7 @@ Opik 核心仓库、Claude Code 插件和 MCP Server 都在各自仓库标明 Ap
 - Claude Code 需要安装独立的 `opik-claude-code-plugin` 并通过 Hook 启用追踪；Cursor、Claude Code、VS Code Copilot、Codex、opencode 可通过 `opik-mcp` 配置访问 Opik。[^opik-claude-plugin][^opik-mcp-doc]
 - 如果评估需要 LLM Judge，配置 DeepSeek 或公司 OpenAI-compatible API 的 Base URL、密钥和模型；公司非兼容 API 需要自定义模型实现。[^opik-provider][^opik-custom-model]
 
-### 接入过程
+### 最快验证路径
 
 1. 先启动自托管 Opik，运行 `opik configure --use_local`，让 SDK 将数据发送到本地 API；用 `--verify` 检查 Compose 服务健康。[^opik-local-deploy]
 2. 在应用入口用 `@track`、`track_openai`、框架集成或 OTel exporter 建立根 Trace；把仓库、分支、Agent、Skill 版本和任务编号写入项目名、标签或 metadata。

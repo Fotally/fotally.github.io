@@ -1,3 +1,15 @@
+---
+title: "Entire CLI：用 Git Checkpoint 连接 AI 会话与代码变更"
+kind: open-source-research-report
+status: completed
+topic: AI 开发会话收集
+project: Entire CLI
+role: primary
+brief_version: "1.0"
+---
+
+# Entire CLI：用 Git Checkpoint 连接 AI 会话与代码变更
+
 > **项目快照**：官方仓库 `entireio/cli`｜核验日期 2026-09-03｜5,051 Stars｜MIT｜最新稳定版 v0.10.4 发布于 2026-09-02，主分支于 2026-09-03 仍有更新。[^entire-repository-snapshot][^entire-license][^entire-release]
 
 > **需求画像**：希望从员工本地发现 Claude Code 等编码 Agent 会话，由用户筛选后共享完整会话；支持多 Agent、保护隐私、可在单机试点，并为分析开发过程和更新 Skill 提供可追溯材料。逐会话确认和原始会话上传是期望能力，但暂不作为第一阶段硬性条件。
@@ -203,7 +215,7 @@ Entire CLI 的核心采集、Checkpoint、Git refs 和查询能力属于 MIT 开
 - 团队共享时需要一个有合适权限的 Git remote；
 - 使用官方控制面时才需要 Entire 登录。
 
-### 接入过程
+### 最快验证路径
 
 1. 安装 Entire：
     
@@ -397,21 +409,6 @@ Entire CLI 非常适合解决“开发会话分散在个人电脑、会话与代
 如果“上传内容必须是原始文件逐字节副本”和“任何上传都必须经过逐 Session 内容预览确认”升级为硬约束，Entire CLI 不能单独满足需求。
 
 如果第一阶段允许先验证会话证据是否能产生有价值的 Skill 候选，则当前没有硬性否决项。
-
-### 下一步验证项
-
-1. 在无敏感数据的测试仓库中导入一个指定 Claude Code Session，对比原始 JSONL 和 checkpoint `full.jsonl` 的字段保留情况。
-    
-2. 设置 `push_sessions=false`，验证普通代码 push 不会发送 checkpoint refs。
-    
-3. 验证独立私有 checkpoint 仓库能否使用公司的 Git 服务，而不局限于文档示例中的 GitHub。
-    
-4. 检查中文姓名、手机号、内部项目代号和公司密钥格式的脱敏覆盖率。
-    
-5. 试验一个最小本地 Session Picker，确认能否在不复制原始会话的前提下完成预览和明确授权。
-    
-6. 将一个 checkpoint 转换成“问题、尝试、失败、修复、测试、结果”结构，验证它对更新 Skill 是否真正有用。
-    
 
 ---
 

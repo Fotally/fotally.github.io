@@ -1,3 +1,13 @@
+---
+title: "Graphiti：带时间和来源追踪的上下文知识图谱"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Graphiti
+role: primary
+brief_version: "1.0"
+---
+
 # Graphiti：带时间和来源追踪的上下文知识图谱
 
 > **项目快照**：官方仓库 <https://github.com/getzep/graphiti>｜核验日期 2026-09-03｜Stars 约 30.5k｜许可证 Apache-2.0｜仓库在核验日有提交，最新 Release `mcp-v1.1.0` 发布于 2026-09-01。[^graphiti-repository][^graphiti-license][^graphiti-release]
@@ -134,7 +144,7 @@ Graphiti 的匿名遥测默认启用但可用 `GRAPHITI_TELEMETRY_ENABLED=false`
 - 支持结构化输出的 LLM 和 Embedding；OpenAI-compatible Base URL 可接 DeepSeek、公司服务或本地 Ollama/vLLM，但要确认 JSON Schema 兼容性。[^graphiti-repository]
 - 设计项目/成员/Agent/Skill/会话的 `group_id`、实体类型和权限映射。
 
-### 接入过程
+### 最快验证路径
 
 1. 用 Docker Compose 启动 Neo4j 或 FalkorDB，安装 `graphiti-core` 及对应 extra，并初始化索引/约束。[^graphiti-repository][^graphiti-quickstart]
 2. 将经用户授权的会话摘要、完整会话或结构化决策包装成 Episode，调用 `add_episode` 写入图谱；保留原始文件 ID、Skill 版本和分支元数据。[^graphiti-quickstart]

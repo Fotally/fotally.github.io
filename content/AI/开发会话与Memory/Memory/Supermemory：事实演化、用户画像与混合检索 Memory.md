@@ -1,3 +1,13 @@
+---
+title: "Supermemory：事实演化、用户画像与混合检索 Memory"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Supermemory
+role: primary
+brief_version: "1.0"
+---
+
 # Supermemory：事实演化、用户画像与混合检索 Memory
 
 > **项目快照**：官方仓库 <https://github.com/supermemoryai/supermemory>｜核验日期 2026-09-04｜Stars 29,207｜许可证 MIT｜main 分支最近提交 2026-09-02；GitHub Releases 的本地服务器最新可见预发布版本为 `server-v0.0.7-rc.2`（2026-07-22）。[^supermemory-repository][^supermemory-license][^supermemory-release]
@@ -136,7 +146,7 @@ Supermemory 直接覆盖“把业务知识和经验记住，并按项目和用�
 - 为项目、仓库、开发者和 Agent 设计稳定的 `containerTag`/space；不要把个人隐私和团队业务知识无区分地写入同一个范围。
 - 对 Claude Code、Codex、Cursor 等会话编写适配器，将消息、工具调用、代码改动、测试结果和 Skill 使用记录统一成提交给 `add` 的结构。
 
-### 接入过程
+### 最快验证路径
 
 1. 运行 `curl -fsSL https://supermemory.ai/install | bash`、`npx supermemory local` 或使用 SDK；local 首次启动在本地目录建立数据和 API Key。[^supermemory-selfhost-quickstart]
 2. 配置一个公司 API、DeepSeek 或其他 OpenAI-compatible LLM 的 `OPENAI_BASE_URL`、API Key 和模型名；为中文语料在首次建库前选择 `Xenova/bge-m3` 等多语言 Embedding 或远程模型。[^supermemory-selfhost-config][^supermemory-embeddings]

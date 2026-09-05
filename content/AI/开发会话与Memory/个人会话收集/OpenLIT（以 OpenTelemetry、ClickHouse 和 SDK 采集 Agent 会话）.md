@@ -1,3 +1,13 @@
+---
+title: "OpenLIT：以 OpenTelemetry、ClickHouse 和 SDK 采集 Agent 会话"
+kind: open-source-research-report
+status: completed
+topic: AI 开发会话收集
+project: OpenLIT
+role: primary
+brief_version: "1.0"
+---
+
 # OpenLIT：以 OpenTelemetry、ClickHouse 和 SDK 采集 Agent 会话
 
 > **项目快照**：官方仓库 [openlit/openlit](https://github.com/openlit/openlit)｜核验日期 2026-09-03｜Stars 约 2.7k｜许可证 Apache-2.0｜最新可见 Release 为 `openlit-2.0.0`（2026-08-28），主分支包含 Claude Code、Cursor 和 Codex coding-agent hook。[^openlit-repository][^openlit-license][^openlit-release]
@@ -123,7 +133,7 @@ OpenLIT 官方安装文档明确写明 Apache-2.0、自托管功能无需 licens
 - 本地 coding agent 能安装 vendor hook；CLI 当前支持 `claude-code`、`cursor`、`codex` 和 `all`，并可用 `openlit doctor` 检查配置、连通性和插件。[^openlit-coding]
 - 若观测常规 Agent 应用，安装 `openlit` SDK 并按语言初始化；模型 API、公司 API 或 DeepSeek API 仍由被观测应用配置。
 
-### 接入过程
+### 最快验证路径
 
 1. 在内网服务器克隆仓库并执行 `docker compose up -d`，验证 OpenLIT、ClickHouse 和 Collector 正常。[^openlit-install]
 2. 本地安装 OpenLIT CLI，运行 `openlit configure --endpoint http://<server>:4318 [--api-key <key>]`，再执行 `openlit coding install --vendor=all` 或选择单一 vendor。[^openlit-coding]
@@ -200,13 +210,6 @@ OpenLIT 原生覆盖 Claude Code、Cursor、Codex hook，提供多级内容采�
 ### 否决风险
 
 当前未发现许可证或单机部署方面的硬性否决项。若公司要求自动保留原始会话且不能接受客户端 hook 改造，或要求平台本身提供成熟的业务 Memory/Skill 发布治理，OpenLIT 不能单独满足目标。
-
-### 下一步验证项
-
-1. 用 Claude Code、Cursor、Codex 各执行一条含工具调用、失败重试、文件编辑和子 Agent 的会话，核对统一字段和 chat rollup。
-2. 分别测试三种 capture mode，确认 full 模式能否满足经验提取，同时验证 secrets、路径和 prompt 的 redaction。
-3. 在单台服务器上导入一批真实会话，测量 ClickHouse 磁盘增长、查询延迟、容器内存和备份恢复。
-4. 设计“本地选择/确认→原始对象存储→trace 引用→Memory/Skill PR”的最小桥接，确认不改变现有 Agent 工作流。
 
 ---
 

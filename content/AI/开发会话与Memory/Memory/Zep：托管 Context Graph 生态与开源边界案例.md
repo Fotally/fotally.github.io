@@ -1,3 +1,13 @@
+---
+title: "Zep：托管 Context Graph 生态与开源边界案例"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Zep
+role: boundary_case
+brief_version: "1.0"
+---
+
 # Zep：托管 Context Graph 生态与开源边界案例
 
 > **项目快照**：官方仓库 <https://github.com/getzep/zep>｜核验日期 2026-09-03｜Stars 约 4.9k｜许可证 Apache-2.0｜当前仓库在核验日有维护，但仓库自述为 Zep Cloud 示例/集成集合；旧 Community Edition 已移至 `legacy` 且不再支持。[^zep-repository][^zep-license]
@@ -131,7 +141,7 @@ Zep Cloud 的 Memory 产品能力很完整，但当前开源仓库不满足“�
 - 选择 framework integration、ingestion 工具或 MCP/CLI；准备将开发会话转换为 thread/message/episode。
 - 若要求内网和可控数据边界，需改选 Graphiti 或自建等价服务。
 
-### 接入过程
+### 最快验证路径
 
 1. 通过 SDK 创建用户/线程并写入消息或业务数据；或使用仓库 `ingestion` 工具导入 Slack、文档、Email、JSON/CSV 等。[^zep-repository]
 2. 查询图谱节点、边、episode 或 observation，组装给 Agent 的上下文。[^zepctl]

@@ -1,3 +1,13 @@
+---
+title: "EverOS：以 Markdown、Episode 和 Skill 演化的本地 Memory"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: EverOS
+role: primary
+brief_version: "1.0"
+---
+
 # EverOS：以 Markdown、Episode 和 Skill 演化的本地 Memory
 
 > **项目快照**：官方仓库 <https://github.com/EverMind-AI/EverOS>｜核验日期 2026-09-04｜Stars 12,676｜许可证 Apache-2.0｜最近维护：`main` 分支最近提交为 2026-09-01。[^everos-repository][^everos-license][^everos-commits]
@@ -148,7 +158,7 @@ EverOS README 中的“多 Agent 生态”表示已有集成或示例，并不�
 - 为每个应用和仓库规划 `app_id`、`project_id`，为成员、Agent、分支和会话建立稳定标识；将原始会话文件 ID放入消息元数据或外部索引。
 - 若多人通过服务器访问，准备反向代理/认证层，因为 EverOS 不提供内置认证。[^everos-api]
 
-### 接入过程
+### 最快验证路径
 
 1. 执行 `everos init --root <path>` 生成 `everos.toml` 与 `ome.toml`，并在 `[llm]`、`[embedding]`、`[rerank]` 中配置可切换的模型 Base URL 和凭据。[^everos-quickstart][^everos-config]
 2. 启动 `everos server start`，调用 `/health` 确认 LLM、Embedding、Rerank 和 Cascade 能力；只配置 LLM 时可先用关键词检索。[^everos-quickstart][^everos-api]

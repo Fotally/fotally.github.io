@@ -1,6 +1,16 @@
+---
+title: "CloudCLI UI：跨 Agent 本地会话发现与预览"
+kind: open-source-research-report
+status: completed
+topic: AI 开发会话收集
+project: CloudCLI UI
+role: primary
+brief_version: "1.0"
+---
+
 # CloudCLI UI：跨 Agent 本地会话发现与预览
 
-> **项目快照**：官方仓库 https://github.com/siteboon/claudecodeui ｜核验日期 2026-09-03｜Stars 约 13.6k｜许可证 AGPL-3.0-or-later｜最近发布 v1.37.2（2026-08-18），主分支 2026-09-03 仍有提交。[^project-repository][^project-license][^project-release]
+> **项目快照**：官方仓库 https://github.com/siteboon/claudecodeui ｜核验日期 2026-09-03｜Stars 约 13.6k｜许可证 AGPL-3.0-or-later｜最近发布 v1.37.2（2026-08-18），主分支 2026-09-03 仍有提交。[^cloudcli-repository][^cloudcli-license][^cloudcli-release]
 
 > **需求画像**：目标是把分散在开发者本地目录中的 Claude Code 等 Agent 会话集中发现、按项目整理、检索和预览，以便用户主动挑选有价值的完整会话，再交给后续经验提取或人工上传流程。必须支持多 Agent、保留原始会话上下文、可在单机部署；可以接受项目本身不提供中央知识库、自动脱敏、上传审批和 Skill 变更治理。
 
@@ -8,7 +18,7 @@
 
 ### 目标用户与使用场景
 
-CloudCLI UI 面向使用 AI 编程 CLI 的开发者。开发者可以在浏览器或移动端打开一个本地运行的 UI，按项目查看已有会话，恢复某次对话，继续运行 Agent，或查看完整历史与元数据。官方定位是 Claude Code、Cursor CLI、Codex 等 CLI 的桌面/移动 Web UI，而不是新的模型服务。[^project-repository][^session-management-doc]
+CloudCLI UI 面向使用 AI 编程 CLI 的开发者。开发者可以在浏览器或移动端打开一个本地运行的 UI，按项目查看已有会话，恢复某次对话，继续运行 Agent，或查看完整历史与元数据。官方定位是 Claude Code、Cursor CLI、Codex 等 CLI 的桌面/移动 Web UI，而不是新的模型服务。[^cloudcli-repository][^session-management-doc]
 
 在本调研场景中，它最相关的用途是“个人本地会话收集入口”：开发者在自己的机器上运行它，自动看到本地 Agent 产生的会话，再由开发者选择值得复盘的会话。这个过程可以减少成员自己翻找个人目录的成本，但不会自动把会话提交到团队中央平台。
 
@@ -24,7 +34,7 @@ CloudCLI UI 面向使用 AI 编程 CLI 的开发者。开发者可以在浏览�
 
 CloudCLI UI 不是会话经验知识库。它没有在开源核心中声明把会话抽取为业务术语、技术决策、失败模式或 Skill 修改候选，也没有对应的审核、版本和 Git 发布闭环。
 
-它也不是团队中央会话采集平台。自托管模式的会话仍在运行 CloudCLI 的机器上；官方“Team sharing”、审计日志和隔离环境属于 CloudCLI Cloud 等产品能力，README 的自托管对比表明确列出自托管没有 Team sharing。[^project-repository]
+它也不是团队中央会话采集平台。自托管模式的会话仍在运行 CloudCLI 的机器上；官方“Team sharing”、审计日志和隔离环境属于 CloudCLI Cloud 等产品能力，README 的自托管对比表明确列出自托管没有 Team sharing。[^cloudcli-repository]
 
 ## 2. 设计的核心思路
 
@@ -66,7 +76,7 @@ flowchart LR
 | 增量同步 | 初次扫描结果、文件 add/change 事件 | `sessionSynchronizerService` 并发运行各 Provider 同步器；成功后更新扫描游标；监听器对单个文件执行同步并合并短时间内的变更 | SQLite `sessions`/`projects` 行、`scan_state`、待广播的 `session_upserted` | [^session-sync-service][^sessions-watcher][^database-schema] |
 | 历史加载 | 应用会话 ID、分页参数 | 通过应用 ID 找到 Provider 和原生 ID；Provider 读取自己的历史，将文本、思考、工具调用和结果转换成 `NormalizedMessage`；文件型历史可使用基于 mtime/size 的缓存 | 统一消息数组、分页信息、可选 token/子 Agent 元数据 | [^provider-sessions][^message-types][^history-cache] |
 | 交互与预览 | 统一消息、项目和会话列表 | Express REST 提供项目/会话/技能等接口，单个 `ws` 网关承载聊天和 Shell 实时通道；前端按 Provider 无关的 `kind` 渲染对话 | 浏览器/移动端的会话列表、完整历史、实时事件和恢复入口 | [^architecture-doc][^network-doc][^chat-doc] |
-| 用户筛选 | 用户看到的项目和会话 | 用户手动选择、重命名、搜索、恢复或删除某一会话；需要上传时由外部流程决定是否提交原始文件 | 一个被用户明确选中的会话；项目本身不会自动上传或抽取经验 | [^session-management-doc][^project-repository] |
+| 用户筛选 | 用户看到的项目和会话 | 用户手动选择、重命名、搜索、恢复或删除某一会话；需要上传时由外部流程决定是否提交原始文件 | 一个被用户明确选中的会话；项目本身不会自动上传或抽取经验 | [^session-management-doc][^cloudcli-repository] |
 
 ### 关键状态与产物
 
@@ -87,12 +97,12 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | 发现分散在本地目录的个人会话 | 必须 | 启动扫描 Provider 会话根目录，并自动出现在项目/会话列表 | [^provider-guide][^session-management-doc] | 满足 | 适用于 CloudCLI 进程所在机器；它读取原始本地目录，不替用户完成跨机器汇聚 |
 | 预览完整原始开发会话 | 必须 | Provider 读取完整历史，统一为消息、工具调用、结果和思考；UI 支持查看 full history | [^provider-sessions][^session-management-doc] | 满足 | 预览由 UI 读取原始工件；需自行核验超长会话、附件和敏感字段展示策略 |
-| 支持多种 Agent | 必须 | Provider registry 与 Provider facet 支持 Claude、Codex、Cursor、OpenCode；README/文档还宣传 Gemini，主分支适配器清单需以实际版本核验 | [^provider-guide][^provider-registry][^project-repository] | 部分满足 | 接入不同 Agent 的思路清楚，但每个 Agent 仍需独立适配；不能把所有宣传的 Agent 视为当前代码均已可用 |
+| 支持多种 Agent | 必须 | Provider registry 与 Provider facet 支持 Claude、Codex、Cursor、OpenCode；README/文档还宣传 Gemini，主分支适配器清单需以实际版本核验 | [^provider-guide][^provider-registry][^cloudcli-repository] | 部分满足 | 接入不同 Agent 的思路清楚，但每个 Agent 仍需独立适配；不能把所有宣传的 Agent 视为当前代码均已可用 |
 | 统一消息模型 | 期望 | `NormalizedMessage` 与共享消息归一化层统一 REST/WebSocket 的事件形状 | [^message-types][^message-unification] | 满足 | 统一的是交互消息，不是经验、业务知识或 Skill 版本模型 |
 | 保留原始会话，不静默上传 | 必须 | 自托管模式读取本地文件/数据库；官方文档没有自动上传原始会话的流程 | [^remote-server-doc][^architecture-doc] | 部分满足 | 本地运行有利于用户控制数据，但项目没有内置“用户确认后上传某一完整会话”的审批/导出工作流，需要外部补齐 |
 | 模型 API 可切换到公司 API/DeepSeek | 期望 | UI 通过各 Provider CLI/SDK 和 Provider 原生认证运行，支持模型选择/自定义模型，但未确认提供通用 OpenAI-compatible base URL 或 DeepSeek 专用适配 | [^prerequisites-doc][^project-package][^provider-guide] | 未确认 | 不能把“支持 Claude/GPT 模型”推定为可切换任意兼容 API；需要 POC 验证或自研 Provider/runtime |
 | 单机部署，不引入重型基础设施 | 必须 | npm/npx 单进程自托管；Express、WebSocket、better-sqlite3 和本地文件系统即可，PM2/反向代理按需增加 | [^quick-start-doc][^architecture-doc][^remote-server-doc] | 满足 | Docker Sandbox 是实验性可选路径；部署在远程服务器时还需处理 Agent CLI、工作区和权限 |
-| 多人共享中央会话 | 期望 | 自托管模式按一台机器的本地工作区提供 UI；对比表将 Team sharing 列为 No | [^project-repository] | 不满足 | 需要额外的多用户目录、权限、上传和对象存储/数据库设计；CloudCLI Cloud 的团队能力不等于 AGPL 自托管核心 |
+| 多人共享中央会话 | 期望 | 自托管模式按一台机器的本地工作区提供 UI；对比表将 Team sharing 列为 No | [^cloudcli-repository] | 不满足 | 需要额外的多用户目录、权限、上传和对象存储/数据库设计；CloudCLI Cloud 的团队能力不等于 AGPL 自托管核心 |
 | 业务 Memory：术语、规则、技术决策 | 必须 | 没有项目知识库、向量索引、Memory 生命周期或冲突治理；消息类型中的 `memoryCitations` 只是引用元数据 | [^message-types][^architecture-doc] | 不满足 | 不应把会话索引或 Provider 配置当作共享业务 Memory |
 | 为 Skill 更新沉淀失败模式和证据 | 必须 | 可查看和搜索会话，并可发现/创建 Provider 原生 `SKILL.md`；没有会话到候选 Skill 变更的抽取、评审、Git 合并和验证闭环 | [^skills-doc][^session-management-doc] | 部分满足 | 适合作为会话证据入口；候选生成、评审和发布需要外部服务或插件 |
 
@@ -106,20 +116,20 @@ CloudCLI UI 对“个人本地会话发现、跨 Agent 预览、单机快速试�
 
 | 能力 | 开源核心 | 商业版或 SaaS | 外部依赖 | 证据 |
 | --- | --- | --- | --- | --- |
-| Web UI、项目/会话列表和会话恢复 | 有 | CloudCLI Cloud 提供托管环境 | 至少一个已安装并认证的 Agent CLI/SDK | [^project-repository][^prerequisites-doc] |
+| Web UI、项目/会话列表和会话恢复 | 有 | CloudCLI Cloud 提供托管环境 | 至少一个已安装并认证的 Agent CLI/SDK | [^cloudcli-repository][^prerequisites-doc] |
 | Provider 适配器与统一消息 | 有（仓库 `server/modules/providers`、`server/shared`） | 未确认是否有商业增强 | 各 Provider 的 CLI/SDK、原生会话存储 | [^provider-guide][^message-types] |
 | 本地 SQLite 索引 | 有 | 托管版由平台负责运行 | `better-sqlite3`、本地文件系统 | [^database-schema][^architecture-doc] |
-| 浏览器/移动端访问 | 有，自托管 Web UI | CloudCLI Cloud 支持跨设备、团队环境和托管隔离 | 网络可达；远程部署建议反向代理 | [^project-repository][^remote-server-doc] |
-| Docker Sandbox 隔离 | 有，仓库包含实验性 Sandbox 模板 | CloudCLI Cloud 有完整云隔离 | Docker `sbx` CLI、微 VM/模板 | [^docker-readme][^project-repository] |
-| Team sharing、审计和环境隔离 | 自托管核心无 | CloudCLI Cloud 宣传提供 | CloudCLI Cloud 服务 | [^project-repository][^remote-server-doc] |
+| 浏览器/移动端访问 | 有，自托管 Web UI | CloudCLI Cloud 支持跨设备、团队环境和托管隔离 | 网络可达；远程部署建议反向代理 | [^cloudcli-repository][^remote-server-doc] |
+| Docker Sandbox 隔离 | 有，仓库包含实验性 Sandbox 模板 | CloudCLI Cloud 有完整云隔离 | Docker `sbx` CLI、微 VM/模板 | [^docker-readme][^cloudcli-repository] |
+| Team sharing、审计和环境隔离 | 自托管核心无 | CloudCLI Cloud 宣传提供 | CloudCLI Cloud 服务 | [^cloudcli-repository][^remote-server-doc] |
 | 业务 Memory、经验抽取和 Skill 变更治理 | 未提供 | 未确认 | 需要外部 Memory/分析/评审系统或自研插件 | [^architecture-doc][^skills-doc] |
 | 通用模型 API 网关或任意 OpenAI-compatible endpoint | 未确认 | 未确认 | 各 Agent 自己的账号/API 配置 | [^prerequisites-doc][^project-package] |
 
 ### 边界判断
 
-AGPL-3.0-or-later 允许内部修改和自托管，但若修改后作为网络服务向用户提供，许可证 Section 13 触发对应源码提供义务，需让法务确认内部部署、二次开发和对外服务边界。[^project-license]
+AGPL-3.0-or-later 允许内部修改和自托管，但若修改后作为网络服务向用户提供，许可证 Section 13 触发对应源码提供义务，需让法务确认内部部署、二次开发和对外服务边界。[^cloudcli-license]
 
-官方同时维护 CloudCLI UI 开源仓库和 CloudCLI Cloud 托管产品。托管产品的团队共享、审计、隔离和无需自建服务器不能自动算入开源核心；本调研只把仓库和官方自托管文档明确支持的能力计入矩阵。[^project-repository][^remote-server-doc]
+官方同时维护 CloudCLI UI 开源仓库和 CloudCLI Cloud 托管产品。托管产品的团队共享、审计、隔离和无需自建服务器不能自动算入开源核心；本调研只把仓库和官方自托管文档明确支持的能力计入矩阵。[^cloudcli-repository][^remote-server-doc]
 
 ## 6. 用户如何接入和使用
 
@@ -129,9 +139,9 @@ AGPL-3.0-or-later 允许内部修改和自托管，但若修改后作为网络�
 - 运行机器必须能访问会话根目录和项目工作区。默认项目发现范围是用户主目录，可用 `WORKSPACES_ROOT` 限定暴露给 CloudCLI 的路径。[^env-doc]
 - 若让其他设备访问，需要让服务监听可达地址；默认端口为 3001。远程公开访问时，官方明确指出项目没有内置认证，应在 Caddy/nginx 等反向代理前增加认证层。[^remote-server-doc][^env-doc]
 
-### 接入过程
+### 最快验证路径
 
-1. 在保存 Agent 会话的机器上执行 `npx @cloudcli-ai/cloudcli`，或全局安装 npm 包后运行 `cloudcli`；打开 `http://localhost:3001`。当前 README 的包名为 `@cloudcli-ai/cloudcli`，部分官方文档页面仍显示旧包名 `@siteboon/claude-code-ui`，试点时应以目标 Release 的 `package.json` 和发布包为准。[^project-repository][^project-package][^quick-start-doc]
+1. 在保存 Agent 会话的机器上执行 `npx @cloudcli-ai/cloudcli`，或全局安装 npm 包后运行 `cloudcli`；打开 `http://localhost:3001`。当前 README 的包名为 `@cloudcli-ai/cloudcli`，部分官方文档页面仍显示旧包名 `@siteboon/claude-code-ui`，试点时应以目标 Release 的 `package.json` 和发布包为准。[^cloudcli-repository][^project-package][^quick-start-doc]
 2. 配置 `WORKSPACES_ROOT`、端口和监听地址；若只是个人试用，让 `HOST` 保持本机或内网可达，不要直接暴露公网。[^env-doc][^remote-server-doc]
 3. 登录 UI，查看自动发现的项目和会话；打开某个会话查看完整历史、时间戳、工具调用及元数据，必要时在原 Provider 上恢复。[^session-management-doc][^chat-doc]
 4. 用户选定一条候选会话后，使用外部的导出/上传或人工复盘流程；CloudCLI UI 本身没有把原始会话提交到中央经验平台的标准流程。
@@ -162,8 +172,8 @@ CloudCLI UI 的发现范围以运行服务的主机文件系统为边界；要�
 | Chokidar 文件监听 | 必需（运行中自动更新） | 监听 Provider 会话文件/数据库变化，触发单文件同步和广播 | 无独立持久化 | 与 session synchronizer、WebSocket 广播服务连接 | [^sessions-watcher] |
 | PM2/systemd | 可选 | 守护进程、崩溃重启和开机启动 | 进程管理器状态/日志 | 监控 Node.js 服务 | [^remote-server-doc][^installation-overview-doc] |
 | Caddy/nginx/Traefik 反向代理 | 远程或公网部署可选 | TLS、认证、压缩、请求日志和访问入口 | 证书、代理日志 | 代理到 CloudCLI `localhost:3001` | [^remote-server-doc][^env-doc] |
-| Docker Sandbox/sbx | 可选、实验性 | 以微 VM/模板隔离 Agent 和工作区 | Sandbox 状态、挂载的工作区和 SQLite | 替代直接在宿主机运行 Agent；需要 Docker `sbx` CLI | [^docker-readme][^project-repository] |
-| CloudCLI 插件进程 | 可选 | 增加自定义 Tab、后端服务、会话分析等 | 插件目录、`~/.claude-code-ui/plugins.json` 等 | 由主服务启动并通过本地 RPC/WebSocket 代理 | [^plugin-security-doc][^project-repository] |
+| Docker Sandbox/sbx | 可选、实验性 | 以微 VM/模板隔离 Agent 和工作区 | Sandbox 状态、挂载的工作区和 SQLite | 替代直接在宿主机运行 Agent；需要 Docker `sbx` CLI | [^docker-readme][^cloudcli-repository] |
+| CloudCLI 插件进程 | 可选 | 增加自定义 Tab、后端服务、会话分析等 | 插件目录、`~/.claude-code-ui/plugins.json` 等 | 由主服务启动并通过本地 RPC/WebSocket 代理 | [^plugin-security-doc][^cloudcli-repository] |
 
 ### 最小部署路径
 
@@ -210,22 +220,22 @@ CloudCLI UI 可以直接满足“本地发现个人 Agent 会话、按项目管�
 - 在每台开发机部署 CloudCLI UI 或增加本地采集器，提供用户选择某会话后导出原始 JSONL/SQLite 内容的明确动作；中央侧接收端负责认证、授权、租户和审计。
 - 将 `NormalizedMessage` 转换为团队会话交换格式，保留 Provider、项目、应用会话 ID、原生会话 ID、时间戳、工具调用和文件引用，避免下游再次解析四种原始格式。
 - 建立分析/Memory 服务：从用户确认的完整会话中抽取业务术语、规则、技术决策和经验候选，并保存来源会话、片段位置、提取模型、版本和人工状态。
-- 建立 Skill 治理插件或外部服务：生成候选 `SKILL.md`/Git diff，关联证据和验证任务，经过负责人审核后提交到现有 Skill 仓库；CloudCLI 的插件系统可以作为 UI 扩展点，但不应绕过 Git 评审。[^project-repository][^plugin-security-doc]
+- 建立 Skill 治理插件或外部服务：生成候选 `SKILL.md`/Git diff，关联证据和验证任务，经过负责人审核后提交到现有 Skill 仓库；CloudCLI 的插件系统可以作为 UI 扩展点，但不应绕过 Git 评审。[^cloudcli-repository][^plugin-security-doc]
 - 为模型 API 做 Provider/runtime 适配验证，明确公司 API、DeepSeek API 的鉴权、endpoint、模型名、流式协议和错误处理；必要时增加独立的 LLM Gateway，而不要假定 CloudCLI 的模型选择器已经提供路由能力。
 
 ### 否决风险
 
 - 若试点要求“仅部署一台服务器就自动获取每个成员个人目录中的会话”，CloudCLI UI 当前不满足：会话发现是本机文件系统范围，跨机器采集仍需同步或上传设计。
-- 若公司不能接受 AGPL 网络服务义务，或不能接受自托管远程部署没有内置认证，则许可证和安全边界可能构成进入试点前的否决项。[^project-license][^remote-server-doc]
+- 若公司不能接受 AGPL 网络服务义务，或不能接受自托管远程部署没有内置认证，则许可证和安全边界可能构成进入试点前的否决项。[^cloudcli-license][^remote-server-doc]
 - 当前未发现会让“单人/单机本地会话发现与预览”无法验证的硬性否决项；建议先做小范围 POC，验证四类会话的发现完整性、长会话加载性能、敏感内容展示和用户主动导出体验。
 
 
 
 ---
 
-[^project-repository]: [CloudCLI UI 官方 GitHub 仓库](https://github.com/siteboon/claudecodeui)
-[^project-license]: [CloudCLI UI 官方许可证（AGPL-3.0-or-later）](https://github.com/siteboon/claudecodeui/blob/main/LICENSE)
-[^project-release]: [CloudCLI UI 官方 Releases 与维护记录](https://github.com/siteboon/claudecodeui/releases)；主分支维护提交：[c1be241（2026-09-03）](https://github.com/siteboon/claudecodeui/commit/c1be241bc41586478f3d15f4dc6a5a6399d40aa1)
+[^cloudcli-repository]: [CloudCLI UI 官方 GitHub 仓库](https://github.com/siteboon/claudecodeui)
+[^cloudcli-license]: [CloudCLI UI 官方许可证（AGPL-3.0-or-later）](https://github.com/siteboon/claudecodeui/blob/main/LICENSE)
+[^cloudcli-release]: [CloudCLI UI 官方 Releases 与维护记录](https://github.com/siteboon/claudecodeui/releases)；主分支维护提交：[c1be241（2026-09-03）](https://github.com/siteboon/claudecodeui/commit/c1be241bc41586478f3d15f4dc6a5a6399d40aa1)
 [^provider-guide]: [Provider Module Guide：Provider 合同、会话扫描根目录与适配器结构](https://github.com/siteboon/claudecodeui/blob/main/server/modules/providers/README.md)
 [^provider-registry]: [provider.registry.ts：Provider 注册表](https://github.com/siteboon/claudecodeui/blob/main/server/modules/providers/provider.registry.ts)
 [^provider-sessions]: [Claude/Codex/Provider sessions 实现目录](https://github.com/siteboon/claudecodeui/tree/main/server/modules/providers/list)

@@ -1,3 +1,13 @@
+---
+title: "Mem0：面向 Agent 的可插拔长期记忆层"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Mem0
+role: primary
+brief_version: "1.0"
+---
+
 # Mem0：面向 Agent 的可插拔长期记忆层
 
 > **项目快照**：官方仓库 <https://github.com/mem0ai/mem0>｜核验日期 2026-09-03｜Stars 约 64.6k｜许可证 Apache-2.0｜仓库在核验日有提交，最新 Release 为 `ts-v3.1.8`（2026-09-02）。[^mem0-repository][^mem0-license][^mem0-release]
@@ -126,7 +136,7 @@ Mem0 直接覆盖“把整理后的业务知识和经验存起来、跨 Agent �
 - 若使用增强混合检索，安装 NLP extra 和对应 spaCy 模型；这会增加本地依赖。[^mem0-repository]
 - 为用户、项目、Agent、会话和原始会话文件建立稳定作用域 ID。
 
-### 接入过程
+### 最快验证路径
 
 1. 以库模式安装 `mem0ai`，或在 `server` 目录按官方说明执行 `make bootstrap`/`docker compose up -d`，得到 API 和 Dashboard。[^mem0-server]
 2. 配置公司 API 或 DeepSeek 的 Base URL、模型名、Embedding，以及向量/数据库后端；用 `Memory.add` 写入经授权的消息。[^mem0-models][^mem0-usage]
@@ -204,3 +214,4 @@ Mem0 没有声明原生读取各类 IDE/CLI 会话文件，也没有声明 Claud
 [^mem0-models]: [Mem0 Supported LLMs and Embeddings](https://docs.mem0.ai/components/llm-models)
 [^mem0-paper]: [Mem0 技术论文](https://arxiv.org/abs/2504.19413)
 [^mem0-configuration]: [Mem0 OSS 配置：Embedder、向量存储与维度兼容性](https://github.com/mem0ai/mem0/blob/main/docs/open-source/configuration.mdx)
+[^mem0-core]: [Mem0 Memory 核心编排源码](https://github.com/mem0ai/mem0/blob/main/mem0/memory/main.py)

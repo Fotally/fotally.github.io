@@ -1,3 +1,13 @@
+---
+title: "Letta Code：带持续学习记忆的开发 Agent Harness"
+kind: open-source-research-report
+status: completed
+topic: AI Memory
+project: Letta Code
+role: primary
+brief_version: "1.0"
+---
+
 # Letta Code：带持续学习记忆的开发 Agent Harness
 
 > **项目快照**：官方仓库 <https://github.com/letta-ai/letta-code>｜核验日期 2026-09-03｜Stars 约 3.2k｜许可证 Apache-2.0｜仓库在核验日有提交，最新 Release 为 `v0.31.11`（2026-09-01）。[^letta-code-repository][^letta-code-license][^letta-code-release]
@@ -127,7 +137,7 @@ Letta 主仓库当前说明：历史 V1 Server 已退役，源代码在 `archive
 - 规划 Agent ID、项目目录和 MemoryFS 的持久化位置；团队共享还需设计同步/服务端存储。
 - 如果导出给 Skill 流程，需要增加 Hook 或事件转发器，记录用户确认的会话范围。
 
-### 接入过程
+### 最快验证路径
 
 1. `npm install -g @letta-ai/letta-code`，在目标代码库运行 `letta`，创建或恢复本地 Agent。[^letta-code-repository]
 2. 按模型配置选择 Claude、GPT、Gemini、DeepSeek 或公司兼容 API；在会话中以 Skill 和记忆工具积累项目上下文。[^letta-code-repository]
