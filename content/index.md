@@ -2,23 +2,8 @@
 title: Aya's Knowledge Garden
 ---
 
-# Aya's Knowledge Garden
+## 知识领域
 
-这里记录我的技术学习和思考。
-
-## AI Engineering
-
-- [[Agent]]
-- [[RAG]]
-- [[MCP]]
-- [[Agent Memory]]
-
-## Software Engineering
-
-- [[Java]]
-- [[Database]]
-- [[Software Architecture]]
+- [[AI/index|AI]]：整理人工智能工具、Agent 扩展机制与相关工程实践。
 
 ## Notes
-
-持续记录学习过程。
