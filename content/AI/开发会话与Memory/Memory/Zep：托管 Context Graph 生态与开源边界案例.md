@@ -40,7 +40,7 @@ Zep 的核心是以时间知识图谱为中心组装上下文：用户消息和�
 
 ### Memory 实现方式
 
-在 Zep Cloud 产品路径中，消息、线程和业务数据进入托管的 Episode/Observation 图谱，系统抽取带时间和关系的事实，再按用户/线程范围做图、向量和全文检索并组装上下文。当前 `getzep/zep` 仓库不包含这套 Context Graph Engine，因此这里的实现方式只能作为产品架构参考，不能当作可自托管实现。[^graphiti-zep][^zep-repository]
+Zep 的公开产品/API 材料将消息、线程和业务数据描述为可进入托管的 Episode/Observation 图谱，并以时间、关系和用户/线程范围组装上下文；但本报告没有把这些产品描述扩展为已核验的内部算法。当前 `getzep/zep` 仓库的可核验部分主要是示例、集成、ingestion 和远程 API 适配，不能证明托管服务端的抽取、图存储或检索实现，也不能当作可自托管实现。[^zep-docs][^zepctl][^graphiti-zep][^zep-repository]
 
 ### 关键设计选择
 
@@ -60,6 +60,31 @@ Zep 的核心是以时间知识图谱为中心组装上下文：用户消息和�
 ### 代价与取舍
 
 托管服务降低了图数据库、索引和权限运维，但要求使用 Zep Cloud API 和其数据边界；当前开源仓库无法提供同等自部署体验。调研判断：对本项目，Zep 更适合作为 Graphiti/Context Graph 的产品化对照，不适合作为单机内网首选。
+
+## 2.1 源码实现核验：Zep 当前仓库与 Graphiti 替代证据
+
+本次核验把源码证据分成三层：`getzep/zep` 当前 `main` 的活动目录、其中明确标为不再支持的 `legacy/`，以及独立的 `getzep/graphiti` 开源仓库。**目录中出现 `graph`、`episode`、`observation` 或 `search` 这些名称，并不等于当前 Zep 仓库包含受支持的 Context Graph Engine。**
+
+### `getzep/zep` 当前仓库能直接核验到什么
+
+- 根 README 将仓库定位为 Zep Cloud 的 example code、framework integrations 和 tools，并明确说仓库不是 Zep 的产品或服务；Community Edition 已移入 `legacy/` 且不再支持。[^zep-repository] `legacy/` 仍能看到历史 `server_ce.go` 和 Graphiti service 客户端代码，但它们不构成当前产品实现证据。[^zep-legacy-server][^zep-legacy-graphiti]
+- `ingestion/src/zep_ingest/transforms/contextualizer.py` 的 `LLMContextualizer` 接收已有的 Episode chunk，为文档片段补充上下文并返回新的 chunk；它没有实现实体/关系抽取、图存储或时间事实合并。[^zep-contextualizer]
+- `mcp/zep-mcp-server/internal/handlers/search.go`、`episodes.go` 和 `nodes.go` 分别构造请求后调用 `client.Graph.Search`、`client.Graph.Episode.GetByUserID` 和 `client.Graph.Node.GetByUserID`，本地代码只做参数校验和结果格式化。它们是访问 Zep API 的 MCP 接入层，不是本地图检索或存储实现。[^zep-mcp-search][^zep-mcp-episodes][^zep-mcp-nodes]
+- 因而，在本次核验的活动目录与路径中，可以确认 SDK/示例、批量 ingestion、MCP API 适配和评估工具；但未发现受支持的当前 Memory/Context Graph Server、其抽取器、Observation 数据模型、时间图更新器或检索引擎。该结论限定于已核验路径和核验时点，不把未检查目录概括为仓库级不存在。
+
+### 能力逐项核验与不可核验部分
+
+| 要核验的实现 | `getzep/zep` 当前仓库 | `legacy/` 能说明什么 | 可用的 Graphiti 源码替代证据 |
+| --- | --- | --- | --- |
+| Memory/Context Graph 抽取 | **不能核验**。当前 ingestion 是上下文补写，MCP 是远程 API 转发；未见当前服务端抽取实现 | `legacy/src` 确有历史 Community Edition 的 API、store 和 Graphiti service 代码，但只能证明旧实现曾存在，不能证明当前 Cloud 的实现或支持状态 | `graphiti.py` 的 `add_episode`、`_extract_and_resolve_nodes`、`_extract_and_resolve_edges`，以及 `prompts/extract_nodes_and_edges.py` 直接展示实体/关系抽取与去重流程。[^graphiti-graphiti-source][^graphiti-extraction-source] |
+| Episode | 当前仓库的示例、SDK/MCP 可以提交或读取远程 Episode；不能核验 Cloud 内部如何建模、抽取和持久化 | 旧 CE 以 message/session/memory 为主，不能把它当作当前 Graphiti 风格的 `EpisodicNode` 证据 | `nodes.py` 的 `EpisodicNode` 和 `graphiti.py` 的 `add_episode` 明确展示原始 Episode 节点、`valid_at` 和派生图数据的关系。[^graphiti-nodes-source][^graphiti-graphiti-source] |
+| Observation | 独立 `zepctl` 的 CLI/API 表面或 Zep Cloud 远程响应可以暴露 observation 概念，但当前活动源码没有对应的本地抽取与持久化模型；Cloud Observation 语义不能从客户端反推 | legacy 代码不能证明 Cloud Observation 的字段、生命周期或兼容性 | Graphiti 没有同名 `Observation` 模型；它提供 `EpisodicNode`、`EntityNode` 和 `EntityEdge` 的独立节点/边分层，只能作功能对照，不能视为 Zep Observation 的等价实现。[^graphiti-nodes-source][^graphiti-edges-source] |
+| 时间图谱与事实失效 | **不能核验当前 Zep Cloud 内部算法**；MCP 搜索只把查询交给远端 API | legacy 中的时间/事实代码属于不再支持的历史 CE，不能用来推断当前产品 | `edges.py` 保存 `valid_at`、`invalid_at`、`expired_at`；`edge_operations.py` 的 `resolve_extracted_edge`/`resolve_edge_contradictions` 展示新事实使旧事实失效的源码路径。[^graphiti-edges-source][^graphiti-edge-operations-source] |
+| 图、向量、全文检索与重排 | 当前仓库只能核验远程 `client.Graph.Search` 接入，不能核验 Cloud 的索引、召回融合、评分或重排实现 | legacy 的 search 包只能作为历史 CE 证据，不是当前实现 | `search.py` 与 `search_config.py` 明确列出 cosine、BM25、BFS、Episode/Community 检索以及 RRF/MMR/cross-encoder 等组合方式。[^graphiti-search-source][^graphiti-search-config-source] |
+
+### 边界结论
+
+因此，本报告可以确认的是：**在当前 `getzep/zep` 公开活动代码和本次核验路径内，主要可见 Zep Cloud 的客户端、示例、集成、ingestion 和 MCP 工具；Zep Cloud 的核心 Context Graph/Memory Engine、Observation 抽取与存储、时间图谱更新以及生产检索实现无法由这些路径核验。** `legacy/` 中存在历史服务代码也不能改变这一结论，因为官方已将 Community Edition 标为不再支持。若需要源码级、可自部署的替代证据，应引用独立 Graphiti 仓库的上述文件；那证明的是 Graphiti 的开源实现能力，不证明 Zep Cloud 内部实现与其完全同构或具备同等商业治理能力。
 
 ## 3. 项目如何工作
 
@@ -212,3 +237,16 @@ Zep Cloud 的 Memory 产品能力很完整，但当前开源仓库不满足“�
 [^zepctl]: [Zep 官方 zepctl CLI](https://github.com/getzep/zepctl)
 [^graphiti-zep]: [Graphiti README 中的 Zep 与 Graphiti 边界](https://github.com/getzep/graphiti#graphiti-and-zep)
 [^zep-graphiti-embedder]: [Graphiti 官方 Embedder 实现（Zep 开源对应框架）](https://github.com/getzep/graphiti/tree/main/graphiti_core/embedder)
+[^zep-contextualizer]: [Zep ingestion 的 LLMContextualizer 源码](https://github.com/getzep/zep/blob/main/ingestion/src/zep_ingest/transforms/contextualizer.py)
+[^zep-mcp-search]: [Zep MCP Server 图搜索 handler 源码](https://github.com/getzep/zep/blob/main/mcp/zep-mcp-server/internal/handlers/search.go)
+[^zep-mcp-episodes]: [Zep MCP Server Episode handler 源码](https://github.com/getzep/zep/blob/main/mcp/zep-mcp-server/internal/handlers/episodes.go)
+[^zep-mcp-nodes]: [Zep MCP Server Node handler 源码](https://github.com/getzep/zep/blob/main/mcp/zep-mcp-server/internal/handlers/nodes.go)
+[^zep-legacy-server]: [Zep legacy Community Edition server 源码](https://github.com/getzep/zep/blob/main/legacy/src/api/server_ce.go)
+[^zep-legacy-graphiti]: [Zep legacy Graphiti service 源码](https://github.com/getzep/zep/blob/main/legacy/src/lib/graphiti/service_ce.go)
+[^graphiti-graphiti-source]: [Graphiti Graphiti 类与 Episode/抽取流程源码](https://github.com/getzep/graphiti/blob/main/graphiti_core/graphiti.py)
+[^graphiti-extraction-source]: [Graphiti 实体与关系抽取提示/模型源码](https://github.com/getzep/graphiti/blob/main/graphiti_core/prompts/extract_nodes_and_edges.py)
+[^graphiti-nodes-source]: [Graphiti 节点与 EpisodicNode 模型源码](https://github.com/getzep/graphiti/blob/main/graphiti_core/nodes.py)
+[^graphiti-edges-source]: [Graphiti EntityEdge 与时间字段源码](https://github.com/getzep/graphiti/blob/main/graphiti_core/edges.py)
+[^graphiti-edge-operations-source]: [Graphiti 事实冲突与时间失效处理源码](https://github.com/getzep/graphiti/blob/main/graphiti_core/utils/maintenance/edge_operations.py)
+[^graphiti-search-source]: [Graphiti 混合检索实现源码](https://github.com/getzep/graphiti/blob/main/graphiti_core/search/search.py)
+[^graphiti-search-config-source]: [Graphiti 检索配置与方法源码](https://github.com/getzep/graphiti/blob/main/graphiti_core/search/search_config.py)

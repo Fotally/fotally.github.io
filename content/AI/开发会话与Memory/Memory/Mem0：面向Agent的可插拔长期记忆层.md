@@ -26,7 +26,7 @@ Mem0 面向需要跨轮次、跨会话保持用户或 Agent 上下文的应用�
 
 长会话直接塞进上下文会增加成本并淹没当前任务。Mem0 通过 `add`/`search` API 把持续信息抽取为较短的记忆条目，避免应用方自行维护摘要和召回索引。[^mem0-usage]
 
-团队知识与个人记忆的生命周期不同。其多级记忆模型允许把 `user_id`、`session_id` 和 `agent_id` 作为作用域过滤条件，因而可分别实现个人、项目和 Agent 共享空间。[^mem0-repository]
+团队知识与个人记忆的生命周期不同。Python OSS API 使用 `user_id`、`run_id` 和 `agent_id` 作为作用域过滤条件；本项目的外部 `session_id` 需要映射到 Mem0 的 `run_id`，因而可分别实现个人、项目和 Agent 共享空间。[^mem0-repository][^mem0-source-main]
 
 ### 问题边界
 
@@ -36,11 +36,11 @@ Mem0 是记忆基础设施，不是开发会话采集器，也不负责发现某
 
 ### 核心判断
 
-Mem0 的主张是：把对话中的长期有用事实交给一个独立记忆层处理，在写入时提取/合并，在读取时按查询召回，而不是让每个 Agent 自己管理完整历史。其开源实现既可嵌入应用，也有带 API Key、Dashboard 和审计能力的自托管 FastAPI 服务。[^mem0-overview][^mem0-server]
+Mem0 的主张是：把对话中的长期有用事实交给一个独立记忆层处理，在写入时提取、对检索候选和当前批次按文本哈希去重并建索引，在读取时按查询召回；已有记忆的修改和删除通过显式 API 完成，而不是让每个 Agent 自己管理完整历史。其开源实现既可嵌入应用，也有带 API Key、Dashboard 和审计能力的自托管 FastAPI 服务。[^mem0-overview][^mem0-server][^mem0-source-main]
 
 ### Memory 实现方式
 
-调用方通过 `add(messages)` 送入对话，LLM 抽取候选事实，随后做实体识别、Embedding 和去重/合并，并按 `user_id`、`agent_id`、`run_id` 写入历史与向量库。`search` 将语义、BM25 和实体匹配结果融合后返回长期事实；更新和删除由记忆层完成，不保留完整 Agent transcript 作为主要检索对象。[^mem0-overview][^mem0-core]
+调用方通过 `add(messages)` 送入对话，LLM 抽取候选事实，随后做实体识别、Embedding 和基于文本哈希的去重，并按 `user_id`、`agent_id`、`run_id` 写入历史与向量库。`search` 将语义、BM25 和实体匹配结果融合后返回长期事实；`update`/`delete` 是显式 API，当前 `add(infer=True)` 路径不会因冲突自动更新或删除已有记忆，不保留完整 Agent transcript 作为主要检索对象。[^mem0-overview][^mem0-core][^mem0-source-main]
 
 ### 关键设计选择
 
@@ -59,7 +59,7 @@ Python OSS 支持 OpenAI、Gemini、Azure OpenAI、Ollama、Hugging Face、Verte
 
 ### 代价与取舍
 
-抽取和合并需要调用 LLM，因此每次写入会增加延迟和模型成本；记忆的正确性取决于抽取提示和冲突策略，不能将每条输出直接视为业务事实。调研判断：Mem0 更像“可插拔记忆服务”，而不是会主动理解整个代码仓库或自动产出 Skill 补丁的知识治理系统。
+抽取需要调用 LLM，因此每次写入会增加延迟和模型成本；当前默认写入路径不自动合并已有记忆，显式更新和删除由管理 API 完成。记忆的正确性取决于抽取提示和外部审核策略，不能将每条输出直接视为业务事实。调研判断：Mem0 更像“可插拔记忆服务”，而不是会主动理解整个代码仓库或自动产出 Skill 补丁的知识治理系统。
 
 ## 3. 项目如何工作
 
@@ -68,7 +68,7 @@ Python OSS 支持 OpenAI、Gemini、Azure OpenAI、Ollama、Hugging Face、Verte
 ```mermaid
 flowchart LR
   A[输入：对话消息或经授权的开发会话] --> B[LLM 抽取长期信息]
-  B --> C[记忆新增、更新或合并]
+  B --> C[候选集与当前批次的文本哈希去重、实体关联]
   C --> D[向量/关键词/实体索引]
   D --> E[输出：按作用域检索的记忆条目]
   E --> F[外部 Agent 拼接到提示词或 Skill 候选分析]
@@ -79,7 +79,7 @@ flowchart LR
 | 阶段 | 接收什么 | 做什么 | 产生的状态或产物 | 证据 |
 | --- | --- | --- | --- | --- |
 | 写入输入 | 消息列表、用户/会话/Agent ID | 通过 `Memory.add` 接收新事实 | 待处理记忆记录 | [^mem0-usage] |
-| 抽取与合并 | 待处理消息及已有记忆 | LLM 判断哪些内容值得长期保存并更新已有条目 | 新增、更新或删除候选 | [^mem0-paper][^mem0-repository] |
+| 抽取与去重 | 待处理消息及已有记忆 | LLM 只抽取新增候选；本地按文本哈希去重，并做实体关联 | 新增候选或空结果；显式 `update`/`delete` 另走管理 API | [^mem0-repository][^mem0-source-main] |
 | 建索引 | 已确认记忆条目 | 生成 Embedding；可选 BM25 和实体信号 | 可检索记忆及作用域元数据 | [^mem0-models] |
 | 召回输出 | 查询、过滤器、`top_k` | 组合相似度与过滤条件返回结果 | 相关记忆列表 | [^mem0-usage] |
 | 应用消费 | 记忆列表和当前任务 | 外部 Agent 将条目放入上下文或交给分析器 | 带上下文的回答、报告或 Skill 候选 | 调研判断 |
@@ -92,7 +92,69 @@ flowchart LR
 
 ### 最终输出
 
-调用方获得按用户、会话或 Agent 过滤的相关记忆。对 Skill 更新场景，建议把 `session_id` 与会话原始文件的不可逆 ID 绑定，由外部分析器把召回条目和原始证据组合为“修改候选”，再进入人工评审。
+调用方获得按用户、`run_id` 或 Agent 过滤的相关记忆。对 Skill 更新场景，建议将外部 `session_id` 映射为 Mem0 的 `run_id`，并同时与会话原始文件的不可逆 ID 绑定；外部分析器再把召回条目和原始证据组合为“修改候选”，进入人工评审。
+
+### 源码实现核验：记忆抽取与持久化
+
+以下结论按 Mem0 官方仓库 `main` 分支提交 `dae67f74f5cc7bf138c7d7d6f9cec5ce4b4373b3` 的源码阅读得出，未安装或运行项目。这里把“LLM 参与冲突处理”和“记忆层提供显式更新/删除 API”分开：当前源码的默认 `add(infer=True)` 是 **add-only 抽取**，不能按旧版提示词描述推断为自动的 ADD/UPDATE/DELETE 合并流程。[^mem0-source-main][^mem0-source-prompts]
+
+#### 关键源码位置
+
+| 官方源码路径 | 关键类/函数 | 核验到的职责 |
+| --- | --- | --- |
+| `mem0/memory/main.py` | `Memory.add`、`_add_to_vector_store`、`_create_memory` | 规范化作用域和 metadata；在 `infer=True` 时检索已有候选、调用 LLM 抽取、Embedding、按哈希去重并写入向量库；`infer=False` 则把每条非 system 消息直接作为记忆。 |
+| `mem0/memory/main.py` | `Memory.search`、`_search_vector_store` | 生成查询向量，执行语义检索；可选执行 keyword/BM25 和实体匹配，再融合排序、过滤过期记忆并返回。 |
+| `mem0/memory/main.py` | `Memory.update`、`_update_memory`、`Memory.delete`、`_delete_memory`、`Memory.history` | 显式更新、删除和历史查询；这些操作使用已有 memory ID，不是 `add` 中的冲突决策。 |
+| `mem0/configs/prompts.py` | `ADDITIVE_EXTRACTION_PROMPT`、`generate_additive_extraction_prompt` | 当前新增记忆抽取提示词和输入组装；要求 JSON 的 `memory` 数组，条目可带 `text`、`attributed_to`、`linked_memory_ids`。 |
+| `mem0/configs/prompts.py` | `DEFAULT_UPDATE_MEMORY_PROMPT`、`get_update_memory_messages` | 仍定义 ADD/UPDATE/DELETE/NONE 的通用更新提示词，但本次检索未发现它被当前 `Memory.add` 抽取路径调用；不能把这段提示词当作当前默认数据流的实现证据。 |
+| `mem0/memory/storage.py` | `SQLiteManager`、`save_messages`、`get_last_messages`、`add_history`、`batch_add_history`、`get_history` | 持久化最近会话消息和 memory 变更历史；不是原始会话/来源对象存储。 |
+| `mem0/embeddings/base.py` | `EmbeddingBase.embed`、`embed_batch` | Embedding 接口，`memory_action` 区分 `add`、`search`、`update`；批量接口默认逐条调用。 |
+| `mem0/vector_stores/base.py`、`mem0/vector_stores/qdrant.py` | `VectorStoreBase`、`Qdrant.search`/`keyword_search`/`insert`/`update`/`delete` | 向量、可选稀疏 BM25、payload 和过滤器的后端接口；Qdrant 集合的 dense vector 维度来自配置。 |
+| `mem0/utils/scoring.py` | `score_and_rank` | 将语义分数、归一化 BM25 分数和实体 boost 融合排序；阈值先作用于语义候选。 |
+
+#### 1. 消息如何经 Agent/LLM 变成 Memory
+
+1. `Memory.add` 先把 `user_id`、`agent_id`、`run_id` 规范化为作用域过滤器，并把非身份 metadata 复制到待写入 payload；至少一个作用域 ID 是必需的。字符串消息会被转成消息列表，视觉消息会先经 `parse_vision_messages` 处理。
+2. 普通 `infer=True` 路径在 `_add_to_vector_store` 中读取该作用域 SQLite 会话最近 **10 条**消息，使用 `parse_messages` 把 system/user/assistant 内容整理成文本；然后对本次消息做一次查询 Embedding，并从向量库检索最多 10 条已有候选，给 LLM 做去重和关联的上下文。[^mem0-source-main][^mem0-source-utils]
+3. LLM 请求由 `ADDITIVE_EXTRACTION_PROMPT`、可选的 `AGENT_CONTEXT_SUFFIX` 和 `generate_additive_extraction_prompt(...)` 组成，调用的是可插拔 LLM 的 `generate_response(...)`，并要求 JSON object。期望输出近似为：[^mem0-source-main][^mem0-source-prompts]
+
+   ```json
+   {"memory": [{"text": "自包含事实", "attributed_to": "user", "linked_memory_ids": ["已有记忆编号"]}]}
+   ```
+
+   `id`/`linked_memory_ids` 在提示词中用于关联上下文，但当前落库的新 memory 仍由源码生成新的 UUID；不能把模型返回的序号当作最终 memory ID。
+4. 响应先经 `remove_code_blocks`，再 `json.loads`；JSON 解析失败时用 `extract_json` 从文本中截取 JSON。LLM 调用失败会包装为 `LLMError`；格式错误会记录，空响应则按“没有抽取到记忆”处理，同时仍保存输入消息。
+5. 每条有效抽取文本用 `EmbeddingBase.embed_batch(..., "add")` 批量向量化，批量失败时逐条 fallback。随后生成 UUID、MD5 文本 hash、BM25 用的 `text_lemmatized`、`data`、创建/更新时间和作用域 metadata，批量 `vector_store.insert`；插入失败还会退回逐条插入。
+6. 抽取后的文本还会批量实体抽取和实体关联，最后调用 `SQLiteManager.save_messages(messages, session_scope)` 保存本次原始消息的简化副本。没有有效抽取结果时也会保存消息，但不会生成 vector memory。
+
+`infer=False` 不调用抽取 LLM，而是对每条非 system 消息直接 Embedding 并调用 `_create_memory`；消息的 `role` 和可用的 `name`（作为 `actor_id`）会进入该记忆的 metadata。`memory_type=procedural_memory` 且存在 `agent_id` 时走 `_create_procedural_memory`：LLM 按 `PROCEDURAL_MEMORY_SYSTEM_PROMPT` 生成执行过程摘要，再把摘要作为一条记忆向量化；这不是普通事实抽取。
+
+#### 2. 更新、删除与冲突处理的真实边界
+
+- **`add` 中的冲突处理是本地候选集去重，不是 LLM 冲突裁决。** `_add_to_vector_store` 只收集本次向量检索返回候选的 hash，并对每个新文本计算 `md5(text.encode())`；已检索候选中同 hash 的记忆或同一批次重复文本会跳过。这只是最多 10 个候选范围内的去重，不是全库精确去重。它不会因为“新事实与旧事实矛盾”而自动 UPDATE 或 DELETE 旧记录，也不会执行 `DEFAULT_UPDATE_MEMORY_PROMPT` 的 ADD/UPDATE/DELETE/NONE 事件流。
+- **显式 `Memory.update`** 先按 ID 读取旧 payload；替换文本时用 `embed(..., "update")`，保留 `created_at`、刷新 `updated_at`、重算 hash 和 BM25 文本，合并 metadata 并拒绝修改身份字段，再调用 vector store 的 `update`，写入一条 `UPDATE` history。文本改变时会清理并重建实体链接；实体清理/重建失败不回滚向量更新。
+- **显式 `Memory.delete`** 先确认 ID 存在，再删除向量并写入 `DELETE` history（旧文本保留、新文本为 `None`、`is_deleted=1`），随后尽力清理实体链接。`delete_all` 也只是按作用域分页列出后逐条调用 `_delete_memory`，没有跨后端原子批量删除。
+- 向量库写入、SQLite history 写入和实体索引不是一个事务；批量失败时的逐条 fallback 可能留下部分成功状态。`history(memory_id)` 只查 SQLite，不验证向量库当前是否还有该 memory，因此删除后历史仍可读（前提是 history DB 未损坏）。
+
+#### 3. Embedding、检索和排序
+
+- `EmbeddingBase` 的接口是 `embed(text, memory_action)` 与 `embed_batch(texts, memory_action="add")`。源码把 `"add"`、`"search"`、`"update"` 传给配置的 embedder，但具体模型是否对不同 action 做不同处理由 provider 实现决定；基础接口没有固定维度。[^mem0-source-embeddings]
+- `Memory.search` 将查询文本做 lemmatization、实体抽取并以 `embed(query, "search")` 得到向量；`_search_vector_store` 先做语义向量检索，后端支持时再做 `keyword_search`。`score_and_rank` 将语义、归一化 BM25 和实体 boost 相加后归一化排序，最后截取 `top_k`；`threshold` 先过滤语义分数过低的候选，BM25/实体分数不能把它们重新带回结果。可选 reranker 是后续步骤，不是默认必然存在。[^mem0-source-main][^mem0-source-scoring][^mem0-source-vector-base]
+- Qdrant 适配器用配置的 `embedding_model_dims` 创建 cosine dense collection，并可创建名为 `bm25` 的稀疏向量槽；payload 中的 `text_lemmatized`/`data` 被用于关键词索引。更换 Embedding 模型而不重建与新维度匹配的 collection，会导致向量维度不兼容；官方源码没有在 Memory API 层自动迁移旧集合。[^mem0-source-qdrant]
+
+#### 4. 历史、消息与来源持久化
+
+- `MemoryConfig.history_db_path` 默认是 `~/.mem0/history.db`（也受 `MEM0_DIR` 影响）。`SQLiteManager.history` 表记录 `id`、`memory_id`、`old_memory`、`new_memory`、`event`、创建/更新时间、`is_deleted`、`actor_id` 和 `role`；`get_history` 按时间顺序返回全部变更，没有 retention limit。[^mem0-source-config][^mem0-source-storage]
+- `messages` 表记录 `id`、`session_scope`、`role`、`content`、`name` 和 `created_at`。`save_messages` 会插入本次消息，但随后只保留该 scope 最新 10 条；它没有原始会话文件 ID、消息来源 URL、分支、模型、工具调用、脱敏状态或引用片段字段，且同一保存批次共用一个时间戳。[^mem0-source-storage]
+- 向量 payload 能保存任意非身份 metadata，因此调用方可以把 `source`、原始会话不可逆 ID 或文件路径作为普通 metadata 写入；源码没有特殊的来源对象、引用链或证据校验机制。历史表也不会自动复制这些任意 metadata，所以“source 存在 payload”不等于“每一次 UPDATE/DELETE 都有可追溯原始证据”。
+- `MemoryItem` 主要暴露 `id`、`memory`、`hash`、`metadata`、`score`、`created_at`、`updated_at`；不存在独立的必填 `source` 字段。因而本项目要实现可审计 Skill 候选，仍需在 Mem0 外部保存完整原始会话、消息片段、模型/提示版本、来源关联和人工评审状态。[^mem0-source-config]
+
+#### 核验后的结论与限制
+
+1. “LLM 抽取 + Embedding + 语义/BM25/实体检索”是当前 OSS 主路径；“冲突时自动 UPDATE/DELETE”不是当前 `add(infer=True)` 的实际行为，而是显式管理 API 或未被该路径调用的旧/通用更新提示词能力。
+2. Mem0 的 history 是 memory 变更日志，SQLite messages 是受限的最近消息上下文，不是完整 Agent transcript 或来源证据库；默认只保留每个 session scope 最近 10 条消息。
+3. 来源信息可以通过 metadata 自行附带，但没有一等来源模型、引用链和跨向量库/SQLite 的事务；这正是开发会话 Skill 候选场景必须外置的证据治理部分。
+4. 因此报告前文的“更新/删除由记忆层完成”应理解为显式 `update`/`delete` API，而不是抽取阶段的自动冲突合并；本节源码核验优先于旧版提示词或论文中的抽象描述。
 
 ## 4. 与需求画像逐项对照
 
@@ -158,7 +220,7 @@ Mem0 没有声明原生读取各类 IDE/CLI 会话文件，也没有声明 Claud
 | --- | --- | --- | --- | --- | --- |
 | Mem0 SDK/Server | 必需（选一） | 提供记忆写入、更新和搜索 API | 记忆元数据、请求日志（Server） | 调用 LLM/Embedding 与存储后端 | [^mem0-overview][^mem0-server] |
 | PostgreSQL + pgvector 或其他向量后端 | 依部署配置 | 持久化向量和记忆数据 | 向量、条目、作用域 | 被 Server/SDK 访问 | [^mem0-server][^mem0-models] |
-| LLM 服务 | 必需 | 抽取、合并记忆；可参与检索增强 | 通常无本地持久化 | 由 SDK/Server 调用 | [^mem0-models] |
+| LLM 服务 | 必需 | 抽取记忆；当前默认写入路径不自动合并，可参与检索增强 | 通常无本地持久化 | 由 SDK/Server 调用 | [^mem0-models][^mem0-source-main] |
 | Embedding 服务/模型 | 必需的检索路径 | 生成查询和记忆向量 | 模型缓存（可选） | 被向量后端使用 | [^mem0-models] |
 | Dashboard 与认证 | Server 可选/随 Server 提供 | 管理、API Key 和审计 | 账号与审计数据 | 访问 Server API | [^mem0-server] |
 | NLP 依赖（BM25/实体） | 可选 | 增强关键词与实体检索 | 本地模型缓存 | SDK 处理写入/查询 | [^mem0-repository] |
@@ -215,3 +277,12 @@ Mem0 没有声明原生读取各类 IDE/CLI 会话文件，也没有声明 Claud
 [^mem0-paper]: [Mem0 技术论文](https://arxiv.org/abs/2504.19413)
 [^mem0-configuration]: [Mem0 OSS 配置：Embedder、向量存储与维度兼容性](https://github.com/mem0ai/mem0/blob/main/docs/open-source/configuration.mdx)
 [^mem0-core]: [Mem0 Memory 核心编排源码](https://github.com/mem0ai/mem0/blob/main/mem0/memory/main.py)
+[^mem0-source-main]: [Mem0 `mem0/memory/main.py`（源码核验，commit `dae67f7`）](https://github.com/mem0ai/mem0/blob/dae67f74f5cc7bf138c7d7d6f9cec5ce4b4373b3/mem0/memory/main.py)
+[^mem0-source-prompts]: [Mem0 `mem0/configs/prompts.py`（抽取与更新提示词，commit `dae67f7`）](https://github.com/mem0ai/mem0/blob/dae67f74f5cc7bf138c7d7d6f9cec5ce4b4373b3/mem0/configs/prompts.py)
+[^mem0-source-storage]: [Mem0 `mem0/memory/storage.py`（SQLite history/messages，commit `dae67f7`）](https://github.com/mem0ai/mem0/blob/dae67f74f5cc7bf138c7d7d6f9cec5ce4b4373b3/mem0/memory/storage.py)
+[^mem0-source-config]: [Mem0 `mem0/configs/base.py`（MemoryConfig/MemoryItem，commit `dae67f7`）](https://github.com/mem0ai/mem0/blob/dae67f74f5cc7bf138c7d7d6f9cec5ce4b4373b3/mem0/configs/base.py)
+[^mem0-source-embeddings]: [Mem0 `mem0/embeddings/base.py`（EmbeddingBase，commit `dae67f7`）](https://github.com/mem0ai/mem0/blob/dae67f74f5cc7bf138c7d7d6f9cec5ce4b4373b3/mem0/embeddings/base.py)
+[^mem0-source-vector-base]: [Mem0 `mem0/vector_stores/base.py`（VectorStoreBase，commit `dae67f7`）](https://github.com/mem0ai/mem0/blob/dae67f74f5cc7bf138c7d7d6f9cec5ce4b4373b3/mem0/vector_stores/base.py)
+[^mem0-source-qdrant]: [Mem0 `mem0/vector_stores/qdrant.py`（Qdrant backend，commit `dae67f7`）](https://github.com/mem0ai/mem0/blob/dae67f74f5cc7bf138c7d7d6f9cec5ce4b4373b3/mem0/vector_stores/qdrant.py)
+[^mem0-source-scoring]: [Mem0 `mem0/utils/scoring.py`（混合排序，commit `dae67f7`）](https://github.com/mem0ai/mem0/blob/dae67f74f5cc7bf138c7d7d6f9cec5ce4b4373b3/mem0/utils/scoring.py)
+[^mem0-source-utils]: [Mem0 `mem0/memory/utils.py`（消息/JSON 解析，commit `dae67f7`）](https://github.com/mem0ai/mem0/blob/dae67f74f5cc7bf138c7d7d6f9cec5ce4b4373b3/mem0/memory/utils.py)
