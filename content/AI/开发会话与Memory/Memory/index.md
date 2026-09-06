@@ -11,6 +11,7 @@ title: Memory 开源项目
 - [[Graphiti：带时间和来源追踪的上下文知识图谱]]：通过时间事实、Episode 溯源和混合检索构建动态上下文图谱。
 - [[Cognee：从多源数据构建知识图谱记忆]]：将会话、工具轨迹和多源资料构建为会话记忆与永久知识图谱。
 - [[TencentDB-Agent-Memory：面向 Agent 团队的长期记忆与 Skill 平台]]：以 L0-L3 分层 Memory、Skill、LLM-Wiki、CodeGraph 和 MemoryProxy 支持多 Agent 团队共享与装配。
+- [[Basic Memory：安装、配置与使用]]：以本地 Markdown、SQLite 和 MCP 接入 AI Agent，支持项目路由、导入和可选语义重排。
 - [[Hindsight：Retain、Recall、Reflect 的学习型 Agent Memory]]：以 Retain、Recall、Reflect 和多路检索实现会学习的 Agent Memory。
 - [[EverOS：以 Markdown、Episode 和 Skill 演化的本地 Memory]]：以 Markdown 事实源、Episode 反思和 Skill 演化构建 local-first Memory。
 - [[Supermemory：事实演化、用户画像与混合检索 Memory]]：维护静态/动态用户画像、事实变化和 Memory+RAG 混合检索。
@@ -22,7 +23,7 @@ title: Memory 开源项目
 
 ## 统计
 
-- 共 13 篇：12 个可进入单机试点比较的 Memory 项目（Mem0、Letta Code、Graphiti、Cognee、TencentDB-Agent-Memory、Hindsight、EverOS、Supermemory、LightRAG、Memobase、MemU、claude-mem），以及 1 个用于理解 Context Graph 商业化与开源边界的案例（Zep）。
+- 共 14 篇：13 个可进入单机试点比较或安装验证的 Memory 项目（Mem0、Letta Code、Graphiti、Cognee、TencentDB-Agent-Memory、Basic Memory、Hindsight、EverOS、Supermemory、LightRAG、Memobase、MemU、claude-mem），以及 1 个用于理解 Context Graph 商业化与开源边界的案例（Zep）。
 
 ## 向量化与模型接口速查
 
