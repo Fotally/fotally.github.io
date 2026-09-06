@@ -2,25 +2,27 @@
 title: Memory 开源项目
 ---
 
-这里整理可自部署的 Agent Memory 项目，以及适合会话知识和 Skill 更新闭环借鉴的架构。
+这里整理可自部署的 Agent Memory 项目，以及从开发会话派生知识和 Skill 更新闭环时可借鉴的架构。
 
 ## 项目
 
 - [[Mem0：面向Agent的可插拔长期记忆层]]：以多级作用域、混合检索和 API 形式提供可插拔记忆层。
-- [[Letta Code：带持续学习记忆的开发 Agent Harness]]：以 MemoryFS、持续学习和 Skill 机制支持长期开发 Agent。
+- [[Letta Code：带持续学习记忆的开发 Agent Harness]]：完整的 memory-first 开发 Agent Harness；本目录只借鉴其 Memory Block 与 MemoryFS/Git 机制。
 - [[Graphiti：带时间和来源追踪的上下文知识图谱]]：通过时间事实、Episode 溯源和混合检索构建动态上下文图谱。
 - [[Cognee：从多源数据构建知识图谱记忆]]：将会话、工具轨迹和多源资料构建为会话记忆与永久知识图谱。
+- [[TencentDB-Agent-Memory：面向 Agent 团队的长期记忆与 Skill 平台]]：以 L0-L3 分层 Memory、Skill、LLM-Wiki、CodeGraph 和 MemoryProxy 支持多 Agent 团队共享与装配。
 - [[Hindsight：Retain、Recall、Reflect 的学习型 Agent Memory]]：以 Retain、Recall、Reflect 和多路检索实现会学习的 Agent Memory。
 - [[EverOS：以 Markdown、Episode 和 Skill 演化的本地 Memory]]：以 Markdown 事实源、Episode 反思和 Skill 演化构建 local-first Memory。
 - [[Supermemory：事实演化、用户画像与混合检索 Memory]]：维护静态/动态用户画像、事实变化和 Memory+RAG 混合检索。
 - [[LightRAG：图结构与向量检索的业务知识 Memory]]：用图结构、向量和关键词混合检索组织业务知识。
 - [[Memobase：以 Profile 与事件时间线构建可控用户 Memory]]：以 Profile、Event Timeline 和 buffer flush 形成可控用户记忆。
 - [[MemU：面向主动记忆与多 Agent 的记忆编排]]：以可读记忆文件、Embedding profile 和 Agent 编排支持主动记忆与 Skill 演化。
+- [[claude-mem：面向 Claude Code 的本地会话记忆与压缩检索]]：以 Claude Code Hook 捕获开发事件，将提示和工具上下文异步压缩为 observation、fact 与 session summary，再通过 SQLite/FTS5、可选 Chroma、MCP 和 SessionStart 注入召回。
 - [[Zep：托管 Context Graph 生态与开源边界案例]]：拆解 Zep Cloud 的 Context Graph 思路及其当前开源边界，作为补充参考。
 
 ## 统计
 
-- 共 11 篇：10 个可进入单机试点比较的 Memory 项目（Mem0、Letta Code、Graphiti、Cognee、Hindsight、EverOS、Supermemory、LightRAG、Memobase、MemU），以及 1 个用于理解 Context Graph 商业化与开源边界的案例（Zep）。
+- 共 13 篇：12 个可进入单机试点比较的 Memory 项目（Mem0、Letta Code、Graphiti、Cognee、TencentDB-Agent-Memory、Hindsight、EverOS、Supermemory、LightRAG、Memobase、MemU、claude-mem），以及 1 个用于理解 Context Graph 商业化与开源边界的案例（Zep）。
 
 ## 向量化与模型接口速查
 
@@ -30,9 +32,11 @@ title: Memory 开源项目
 | Letta Code | MemoryFS 可选；Archival Memory 必需 | 当前 Code 未确认固定默认值 | Server archival store | 需匹配 `EmbeddingConfig` endpoint；聊天 API 不能代替 Embedding |
 | Graphiti | 语义检索必需 | OpenAI `text-embedding-3-small` | 图数据库 + 向量索引 | 需兼容 embeddings 接口并固定 `EMBEDDING_DIM` |
 | Cognee | 语义检索必需 | `openai/text-embedding-3-large`；FastEmbed `BAAI/bge-small-en-v1.5` 示例 | 可配置向量存储 | 公司网关需暴露 Embedding；中文模型需单独评测 |
+| TencentDB-Agent-Memory | BM25 可独立运行；语义/混合检索需要 | 远程 OpenAI-compatible Embedding 或本地 provider；维度按配置 | SQLite/sqlite-vec 或 Tencent Cloud VectorDB | 需匹配 provider/model/dimension；更换后重建索引；中文质量需现场验证 |
 | Hindsight | Recall 语义检索必需 | `BAAI/bge-small-en-v1.5` | PostgreSQL/pgvector | LLM 与 Embedding 分开配置；DeepSeek 聊天接口不等于 Embedding |
 | EverOS | 关键词检索可选；向量/混合检索需要 | `Qwen/Qwen3-Embedding-4B` 示例 | LanceDB | OpenAI-compatible `/v1/embeddings`；未确认中文质量基线 |
 | Supermemory | 语义 Memory 路径需要 | 官方本地模型/具体默认维度需按版本核验 | 本地引擎/索引 | 需确认 self-host 版本的模型与维度配置 |
 | LightRAG | 图/向量语义检索必需 | `text-embedding-3-small`、`bge-m3` 等示例 | NanoVectorDB、pgvector、Milvus、Qdrant 等 | 需设置 `EMBEDDING_DIM`；换模型后执行重建 |
 | Memobase | 事件语义检索可选 | `text-embedding-qwen3-embedding-8b`、4096 维示例 | PostgreSQL/pgvector | 可关闭事件 Embedding；DeepSeek 需兼容 Embedding 端点 |
 | MemU | MemoryService 写入/查询必需 | OpenAI `text-embedding-3-small` | SQLite 或 PostgreSQL/pgvector | 可切换 provider/Base URL；内置列表未含 DeepSeek Embedding |
+| claude-mem | 语义检索可选，SQLite FTS5 可独立运行 | `all-MiniLM-L6-v2` ONNX，经 `chroma-mcp` 使用 | SQLite/FTS5 + 可选 Chroma | 没有直接的 Embedding provider/model/base URL 配置；远程 Chroma 或后端改造需要统一模型、维度和索引重建 |

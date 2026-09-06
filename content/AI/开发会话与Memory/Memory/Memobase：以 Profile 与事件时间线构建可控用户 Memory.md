@@ -26,15 +26,15 @@ Memobase 面向需要长期记住用户属性和互动事件的 LLM 应用，例
 
 第一，长对话中的关键信息不适合每次都把原文塞回上下文。Memobase通过预先生成的结构化 Profile 和事件摘要，把长期信息整理成可查询、可限制长度的结果；官方说明将这种方式定位为减少在线分析和控制提示词成本。[^performance-cost]
 
-第二，事实会随新的互动而变化。Memobase不是把每条消息永久当作独立检索片段，而是使用按用户组织的 Profile 槽位，并在缓冲区达到阈值或空闲超时后批量更新长期记忆。[^memobase-repository][^best-practices]
+第二，事实会随新的互动而变化。Memobase不是把每条消息永久当作独立检索片段，而是使用按用户组织的 Profile 槽位，并在缓冲区达到 token 阈值或显式 `flush` 后批量更新长期记忆；官方文档虽描述 idle 超时，当前源码入口仍未确认。[^memobase-repository][^best-practices]
 
 第三，稳定属性和时间性事件的访问方式不同。Profile API返回结构化属性，Context API可以一次组装 Profile 与最新事件；事件还可以保存时间戳、标签和可选的向量表示，用于按时间或语义查询。[^api-overview][^best-practices]
 
 ### 问题边界
 
-Memobase的官方定位是用户 Profile 记忆后端，不是开发会话采集器、代码仓库知识库、Skill 版本管理平台，也不是会话审计或人工评审系统。仓库支持 `chat`、`doc`、`code` 等 Blob 类型，但官方文档没有声明能够直接读取 Claude Code 本地会话目录、解析多种 Agent 私有格式或识别 Skill 失败模式。[^blob-model][^memobase-repository]
+Memobase的官方定位是用户 Profile 记忆后端，不是开发会话采集器、代码仓库知识库、Skill 版本管理平台，也不是会话审计或人工评审系统。仓库的模型文件声明了 `chat`、`doc`、`code` 等 Blob 类型，但当前处理映射并未证明这些类型都能走完整抽取链；官方文档也没有声明能够直接读取 Claude Code 本地会话目录、解析多种 Agent 私有格式或识别 Skill 失败模式。[^blob-model][^memobase-repository]
 
-它也不等同于通用 RAG 或知识图谱。官方明确说明项目重点不是 RAG/search；事件搜索依赖可选的 embedding，结构化 Profile 才是主要输出。因此，把它用于项目业务知识时，仍需在入口处设计文档来源、项目范围和事实审核机制。[^performance-cost][^server-readme]
+它也不等同于通用 RAG 或知识图谱。官方明确说明项目重点不是 RAG/search；事件 Gist 搜索依赖可选的 embedding，结构化 Profile 才是主要输出。因此，把它用于项目业务知识时，仍需在入口处设计文档来源、项目范围和事实审核机制。[^performance-cost][^server-readme]
 
 ## 2. 设计的核心思路
 
@@ -44,13 +44,13 @@ Memobase的核心判断是：对长期个性化上下文，应该把原始互动
 
 ### Memory 实现方式
 
-输入先作为按用户/项目归属的 Blob 进入 buffer；达到 token、空闲或显式 `flush` 条件后，LLM 按 `topic/sub_topic` 生成 Profile Delta，并合并为 `UserProfile`，同时保存带时间的 `UserEvent`/`Event Gist`。在线调用通过 Profile、Event 或 Context API 取结构化结果，事件语义检索才额外使用 Embedding。[^memobase-repository][^database-model][^event-controller]
+输入先作为按用户/项目归属的 Blob 进入 buffer；达到 token 或显式 `flush` 条件后，LLM 按 `topic/sub_topic` 生成 Profile Delta，并合并为 `UserProfile`，同时保存带时间的 `UserEvent`/`Event Gist`。官方文档还描述 idle 超时 flush，但本次源码检查未确认其定时调度入口。在线调用通过 Profile、Event 或 Context API 取结构化结果，事件 Gist 语义检索才额外使用 Embedding。[^memobase-repository][^database-model][^event-controller]
 
 ### 关键设计选择
 
 - **Profile 槽位优先于无结构记忆**：通过 `topic`、`sub_topic` 和描述定义要收集的属性；默认提供常见槽位，也可以在 `config.yaml` 中增加或完全覆盖槽位。这样可以把“业务术语”“领域规则”“接口约束”等知识限制在显式 schema 内，减少无边界记忆。[^profile-fundamentals][^best-practices]
-- **Blob 与用户解耦**：输入统一抽象为用户的 Blob，支持 Chat、Summary、Doc、Code、Image、Transcript 等类型；应用可以选择一次插入整段会话，也可以在会话结束时提交摘要或代码说明。源码中的 `BlobData`、`GeneralBlob` 和 `BufferZone` 分别承载输入类型、持久化数据和待处理缓冲。[^blob-model][^database-model]
-- **缓冲后批处理**：插入数据先进入每个用户的 buffer；当 token 数达到配置上限、空闲时间超过配置值，或应用显式调用 `flush` 时，服务才执行 Profile 更新流程。官方将批处理作为降低 LLM 分析成本和插入延迟的设计。[^memobase-repository][^best-practices][^performance-cost]
+- **Blob 与用户解耦**：输入统一抽象为用户的 Blob，模型文件声明了 Chat、Summary、Doc、Code、Image、Transcript 等类型；但当前完整处理映射只接通 Chat 与 Summary，Chat 抽取入口又要求全部输入为 Chat。源码中的 `BlobData`、`GeneralBlob` 和 `BufferZone` 分别承载输入类型、持久化数据和待处理缓冲。[^blob-model][^database-model]
+- **缓冲后批处理**：插入数据先进入每个用户的 buffer；源码明确实现了 token 超限和显式 `flush`，文档/配置另有 idle 间隔描述，但本次未在 orchestrator 中确认定时调用点。官方将批处理作为降低 LLM 分析成本和插入延迟的设计。[^memobase-repository][^best-practices][^performance-cost]
 - **Profile、Event 与 Event Gist 分层**：Profile保存可归纳的用户事实；Event保存一次处理后的事件数据和时间；Event Gist是更细粒度的事件摘要，可配合 embedding 做时间线语义检索。源码的数据表和 API 响应模型明确区分这三种产物。[^database-model][^response-model][^event-controller]
 - **模型和 Embedding 接口可配置**：服务端用 `llm_base_url`、`llm_api_key`、`best_llm_model` 配置 LLM，并支持 OpenAI SDK 兼容服务；事件 embedding 可选 OpenAI-compatible、Jina、Ollama，亦可关闭。[^server-readme][^config-env]
 
@@ -66,9 +66,9 @@ Memobase 的 Profile 抽取和事件时间线可以在关闭 `enable_event_embed
 
 Profile 槽位带来可控性和较稳定的召回，但它要求在配置阶段先定义知识分类；没有被槽位覆盖的项目事实可能只能作为事件或 Blob 保存，不能自动获得同等的结构化治理。这是调研判断，官方只保证自定义 Profile 配置能力。[^profile-fundamentals]
 
-缓冲与异步 flush 降低了每次写入的开销，却引入最终一致性：刚插入的会话可能尚未进入 Profile。官方建议在会话结束时手动 `flush`，而对于需要原文审计的场景，默认处理后会删除 Blob，必须主动调整配置保留原始输入。[^memobase-repository][^best-practices]
+缓冲与异步 flush 降低了每次写入的开销，却引入最终一致性：刚插入的 ChatBlob 可能尚未进入 Profile。官方建议在会话结束时手动 `flush`；默认处理后会删除 ChatBlob，必须主动调整配置保留原始输入。Summary Blob 不受这段 ChatBlob 清理条件影响。[^memobase-repository][^best-practices]
 
-Memobase的 API 是按项目和用户组织的，模型调用发生在服务端。它可以切换到公司内部 OpenAI-compatible API 或 Ollama，但如果配置外部 LLM/embedding，原始开发会话会离开内网；数据出境、密钥托管和日志脱敏不由 Memory 核心自动解决。[^server-readme][^config-env]
+Memobase的 API 是按项目和用户组织的，模型调用发生在服务端。它可以切换到公司内部 OpenAI-compatible API 或 Ollama，但如果配置外部 LLM/embedding，上传到抽取链的 ChatBlob 内容会离开内网；数据出境、密钥托管和日志脱敏不由 Memory 核心自动解决。[^server-readme][^config-env]
 
 ## 3. 项目如何工作
 
@@ -79,7 +79,7 @@ Memobase的 API 是按项目和用户组织的，模型调用发生在服务端�
 ```mermaid
 flowchart LR
   A[输入：选定的 Agent 会话、文档或代码 Blob] --> B[按项目/用户写入 Blob 与 Buffer]
-  B --> C{达到 token/空闲阈值或手动 flush}
+  B --> C{达到 token 阈值或手动 flush；idle 调度未由本次源码确认}
   C --> D[LLM 抽取 Profile Delta、事件提示与标签]
   D --> E[合并并组织 Profile 槽位]
   D --> F[写入 Event 与 Event Gist]
@@ -97,26 +97,57 @@ flowchart LR
 
 | 阶段 | 接收什么 | 做什么 | 产生的状态或产物 | 证据 |
 | --- | --- | --- | --- | --- |
-| 会话接入 | `ChatBlob`、`DocBlob`、`CodeBlob` 或其他 Blob | 客户端以 `user` 为边界插入 Blob；消息可带 alias、`created_at` 和自定义字段 | `GeneralBlob` 记录原始 Blob；应用可取得 Blob ID | [^memobase-repository][^blob-model] |
-| 缓冲 | 新 Blob 与 token 大小 | 按用户维护 buffer，累计近期互动，等待阈值、空闲超时或手动 flush | `BufferZone` 及其状态；原始 Blob 默认可在处理后删除 | [^memobase-repository][^best-practices][^database-model] |
-| 信息抽取 | 待 flush 的聊天/文档内容与 Profile 配置 | 调用配置的 LLM，按 Profile 槽位生成 Profile Delta，并提取事件提示、标签等 | Profile 更新候选、Event 数据 | [^response-model][^server-readme][^profile-fundamentals] |
+| 会话接入 | 当前完整抽取链已核验为 `ChatBlob`，模型另声明其他 Blob | 客户端以 `user` 为边界插入 Blob；Chat 消息可带 alias、`created_at` 和自定义字段 | `GeneralBlob` 记录输入；应用可取得 Blob ID | [^memobase-repository][^blob-model] |
+| 缓冲 | 新 Blob 与 token 大小 | 按用户维护 buffer，累计近期互动，等待 token 阈值或手动 flush；idle 调度入口未确认 | `BufferZone` 及其状态；处理完成后默认清理的是 ChatBlob | [^memobase-repository][^best-practices][^database-model] |
+| 信息抽取 | 待 flush 的 Chat（以及映射中存在的 Summary）与 Profile 配置 | 调用配置的 LLM，按 Profile 槽位生成 Profile Delta，并提取事件提示、标签等 | Profile 更新候选、Event 数据 | [^response-model][^server-readme][^profile-fundamentals] |
 | Profile 合并 | 当前 Profile 与本轮抽取结果 | 对同一 topic/sub-topic 的内容进行合并、组织和更新；槽位限制影响结果范围 | `UserProfile`，带 content、attributes、created_at、updated_at | [^database-model][^profile-fundamentals] |
 | 事件持久化 | 本轮事件数据与消息时间 | 保存事件时间、事件数据和可选的事件细粒度 gist；按配置为事件生成 embedding | `UserEvent`、`UserEventGist`，可按时间、标签或向量检索 | [^database-model][^event-controller][^best-practices] |
 | 上下文消费 | 用户/项目 ID、主题过滤、token 限制、时间范围 | 查询 Profile 与近期/相关事件，或用 Context API格式化 | 结构化 Profile JSON、事件列表或可直接注入 Prompt 的 Context 字符串 | [^api-overview][^best-practices][^memobase-repository] |
 
+### 源码实现核验：模型文件与完整 orchestrator
+
+以下核验只依据 Memobase 官方仓库 `main` 分支的源码阅读，不代表本地安装或运行结果。需要把“数据模型声明了什么”和“入口实际会走到什么”分开看。
+
+#### 1. 模型文件：声明的对象不等于已接通的处理能力
+
+| 层次 | 官方真实路径 | 已核验内容 |
+| --- | --- | --- |
+| Blob 输入模型 | `src/server/api/memobase_server/models/blob.py` | 声明了 `ChatBlob`、`SummaryBlob`、`DocBlob`、`CodeBlob`、`ImageBlob`、`TranscriptBlob` 等类型；但 `BlobData.to_blob()` 当前实际只完整重建 chat、summary、doc，image/transcript 显式 `NotImplemented`，也没有把 `code` 接到重建分支。因此不能把“类已声明”写成“所有 Blob 类型已端到端支持”。 |
+| 数据库模型 | `src/server/api/memobase_server/models/database.py` | `GeneralBlob`、`BufferZone`、`UserProfile`、`UserEvent`、`UserEventGist` 都以 `user_id + project_id` 为主要隔离边界；事件和 Gist各自有 pgvector embedding 列；`UserEvent.related_user_event_gists` 配置了 `all, delete-orphan`，数据库外键也声明了 `ondelete=CASCADE`。 |
+| API 响应与抽取契约 | `src/server/api/memobase_server/models/response.py` | `ProfileDelta` 只是 `{content, attributes}` 的输入/数据结构；`EventData.profile_delta` 是一个列表，另外保存 `event_tip` 与 `event_tags`。它不是一个独立的事务日志或完整 before/after diff 类型。 |
+| Embedding 工厂 | `src/server/api/memobase_server/llms/embeddings/__init__.py` 及 `llms/embeddings/{openai_embedding,jina_embedding,lmstudio_embedding,ollama_embedding}.py` | `get_embedding()`按配置选择 provider，区分 `query`/`document` phase；OpenAI-compatible 适配器向 `/embeddings` 发送文本列表和配置维度。没有源码证据表明系统会自动发现模型或自动迁移旧向量维度。 |
+
+#### 2. 完整 orchestrator：实际的写入、flush、抽取与消费链
+
+1. **写入与 BufferZone**：`api_layer/blob.py::insert_blob` 先调用 `controllers.blob.insert_blob` 写入 `GeneralBlob`，再调用 `controllers.buffer.insert_blob_to_buffer` 创建一个 `BufferZone`，其 `token_size` 由序列化后的 Blob 计算。`controllers.buffer.detect_buffer_full_or_not` 只按同一用户、项目、Blob 类型的 idle BufferZone 累加 token，并在超过 `CONFIG.max_chat_blob_buffer_token_size` 时返回待处理 ID。
+2. **flush 的实际分支**：`controllers.buffer.flush_buffer_by_ids` 先把 BufferZone 标记为 `processing`，联结读取 Blob，再调用 `controllers.modal.BLOBS_PROCESS[blob_type]`。成功后标记 `done`；若是 `chat` 且 `CONFIG.persistent_chat_blobs` 为 false，才删除对应 `GeneralBlob`。`BufferZone` 本身不会在成功后删除，而是保留为 done 状态。失败时状态改为 `failed`。
+3. **同步与后台 flush**：`api_layer/blob.py` 在 `wait_process=true` 时同步调用 `flush_buffer_by_ids`，否则交给 `buffer_background.py`。后台实现使用 Redis 队列与用户锁，随后仍调用同一个 `flush_buffer_by_ids`；Redis 在这里承担队列/锁职责，不是 BufferZone 的权威持久化表。
+4. **处理映射不是所有 Blob 类型通用**：`controllers/modal/__init__.py` 的 `BLOBS_PROCESS` 当前只映射 `BlobType.chat -> chat.process_blobs` 与 `BlobType.summary -> summary.process_blobs`。`controllers/modal/chat/entry_summary.py` 又断言输入全部是 `chat`，所以 `DocBlob`、`CodeBlob`、`ImageBlob`、`TranscriptBlob` 不能据此推定已经接入同一套 Profile/Event 抽取链。
+5. **Chat orchestrator 的顺序**：`controllers/modal/chat/__init__.py::process_blobs` 先截断并加载项目 Profile 配置、当前 `UserProfile`，再由 `entry_chat_summary.py` 把 ChatBlob 交给 LLM 生成 `user_memo_str`。随后并行执行 `extract.py` 的 Profile 抽取与 `event_summary.py` 的事件标签抽取；Profile 分支使用当前生效的 `merge_yolo.py`。它先计算 `delta_profile_data`，再执行 `organize.py`、`summary.py`，准备待新增/更新/删除的 Profile 操作。
+6. **Profile Delta 与事件的协调**：`process_blobs` 先由 `handle_session_event` 调用 `controllers.event.append_user_event`，写入 `event_tip=user_memo_str`、`event_tags` 和 `profile_delta=add + update_delta`；之后才由 `handle_user_profile_db` 调用 `add_update_delete_user_profiles` 在一次 Profile 数据库事务中执行增删改。因此 `profile_delta` 不是完整的 Profile 结果，不包含删除项，也可能不反映后续 organize/re-summary 对待写 Profile 的整理；事件写入与 Profile 写入没有在源码中显示为同一个跨表事务。
+7. **Event/Gist 生成**：`controllers.event.append_user_event` 校验 `EventData`，在开启 embedding 时为事件整体生成向量；再把 `event_tip` 中以 `-` 开头的非空行拆成 `UserEventGist`，逐条生成 Gist 向量。这里的 Gist 是从已有 memo 的行切分出来的，不是另一个独立的时间线分析器。
+8. **Context API 的实际协调**：`api_layer/context.py` 接收 token、主题、时间范围、相似度阈值和最近 chats；`controllers.context.get_user_context` 并行读取/裁剪 Profile 与 Event Gist。带 chats 且开启 embedding 时，chats 用于 Event Gist 语义搜索；Profile 的按聊天筛选走 `post_process/profile.py` 的 LLM 选择逻辑，并不直接使用 embedding。最终按 `profile_event_ratio` 分配 token 窗口，再格式化为 Context 字符串。
+
+#### 3. 删除策略与当前未确认项
+
+- **Blob**：显式 `delete_blob` 会删除指定 `GeneralBlob`；正常 flush 只对 ChatBlob 执行默认清理，且由 `persistent_chat_blobs` 控制。Summary Blob不会因这段条件自动删除。删除 Blob 会依赖外键级联清理关联 BufferZone，但 done 的 BufferZone 不会单独清理。
+- **Profile**：`controllers.profile` 的单条删除和批量增删改会按 `user_id + project_id` 限定；缓存采用失效而不是直接改写。更新时 `attributes=None` 表示保留原属性，并非清空。
+- **Event/Gist**：删除 UserEvent 时，ORM relationship 的 `delete-orphan` 与数据库外键 `CASCADE` 为其关联 Gist 提供级联路径；但源码中没有看到独立的 Gist 删除 controller/route。`update_user_event` 只合并 `event_data`，没有同步重算已有 embedding 或重建 Gist。
+- **尚未源码确认的事项**：`env.py` 和文档有 `buffer_flush_interval`（默认 1 小时），文档也描述 idle 自动 flush；本次检查到的 `detect_buffer_full_or_not`、`buffer.py` 和 `buffer_background.py` 没有展示 idle 检测或定时调度调用点。因此“idle 超时自动 flush”的实际入口仍应标为未确认，不能只凭配置字段当作已证实的运行链。还未确认独立 `summary.process_blobs` 的完整 Profile/Event 语义，以及 Code/Image/Transcript 是否在其他入口有额外适配。
+
 ### 关键状态与产物
 
-- **Blob**：进入系统的通用输入。`ChatBlob`含 OpenAI-compatible 的 user/assistant 消息；`DocBlob`和`CodeBlob`可以携带文档或代码说明。官方 README说明默认处理完成后会删除 Blob，只保留抽取出的相关 Memory；如需原始会话留存，需要修改配置。[^memobase-repository][^blob-model]
-- **BufferZone**：按用户、项目和 Blob 维护的待处理缓冲记录，含 token 大小和状态。它是“写入”和“长期记忆更新”之间的中间状态，支持在会话结束时由接入层调用 `flush`。[^database-model][^best-practices]
+- **Blob**：进入系统的输入记录。`ChatBlob`含 OpenAI-compatible 的 user/assistant 消息；模型文件还声明 `DocBlob`、`CodeBlob` 等类型，但当前 `BlobData.to_blob()` 与 `BLOBS_PROCESS` 没有证明它们都能走完整抽取链。官方默认清理策略实际针对处理完成的 ChatBlob；如需原始会话留存，需要修改配置。[^memobase-repository][^blob-model]
+- **BufferZone**：按用户、项目和 Blob 维护的待处理缓冲记录，含 token 大小和 `idle/processing/failed/done` 状态。它是“写入”和“长期记忆更新”之间的中间状态，支持在会话结束时由接入层调用 `flush`；源码未在本次检查中显示 idle 定时器如何把它转入 flush。[^database-model][^best-practices]
 - **UserProfile**：以文本 `content` 和 JSON `attributes` 保存的长期事实，属性通常包含 `topic` 与 `sub_topic`，并带创建、更新时间。它适合放稳定业务规则、团队约束或开发者偏好，但需要按项目配置槽位和访问范围。[^database-model][^response-model]
 - **UserEvent**：以 JSON 保存一条时间性事件，可包含 `profile_delta`、`event_tip` 和 `event_tags`，并带事件时间；它能保存“某次会话中发生了什么”而不必把所有内容合并成稳定 Profile。[^response-model][^event-controller]
-- **UserEventGist**：从事件生成的细粒度摘要，可单独向量化并按相似度检索。源码支持 `UserEventGist` 与 `UserEvent` 的关联和级联删除；这适合找回“某次失败修复”一类事件，但不是代码 diff 或 Skill 版本的审计记录。[^database-model][^event-gist-controller]
+- **UserEventGist**：从 `event_tip` 中以 `-` 开头的行切出的细粒度事件片段，可单独向量化并按相似度检索。源码支持 `UserEventGist` 与 `UserEvent` 的关联和级联删除，但未提供独立 Gist 删除 controller/route；这适合找回“某次失败修复”一类事件，但不是代码 diff 或 Skill 版本的审计记录。[^database-model][^event-gist-controller]
 
 ### 最终输出
 
 调用方可以用 Profile API 取得结构化事实，自行格式化到系统提示词；也可以用 Context API 取得包含 Profile 和最新事件的预格式化字符串，并设置最大 token、主题过滤和时间范围。事件 API还可以按时间、标签或 embedding 相似度查询。[^best-practices][^api-overview][^event-controller]
 
-对 Skill 更新闭环，合理的消费方式是：适配器在一次开发任务结束后读取经过授权的会话，向 Memobase写入项目范围的 Chat/Doc/Code Blob；审核工具通过 Profile/Event API 找出候选业务知识和典型失败事件，再把人工确认后的候选写入 Skill 仓库。最后一步是外围治理流程，Memobase本身不自动生成或发布 Skill。
+对 Skill 更新闭环，合理的消费方式是：适配器在一次开发任务结束后读取经过授权的会话，优先向已核验的 Chat 处理链写入项目范围的 Blob；其他 Doc/Code 等类型是否能走同一条完整 orchestrator 需先做源码与 POC 确认。审核工具通过 Profile/Event API 找出候选业务知识和典型失败事件，再把人工确认后的候选写入 Skill 仓库。最后一步是外围治理流程，Memobase本身不自动生成或发布 Skill。
 
 ## 4. 与需求画像逐项对照
 
@@ -126,9 +157,9 @@ flowchart LR
 | --- | --- | --- | --- | --- | --- |
 | 沉淀项目业务知识、术语和规则 | 必须 | 可配置 Profile topic/sub-topic，按用户生成结构化属性 | [^profile-fundamentals][^best-practices] | 部分满足 | 适合有明确槽位的知识；项目级共享范围、术语审批和来源字段需要外围设计。 |
 | 保存技术决策及其演化 | 必须 | 可用 Profile 或 Event 保存文本、属性和时间 | [^database-model][^response-model] | 部分满足 | 有时间字段，但官方未确认专门的决策记录、冲突版本或引用链模型。 |
-| 沉淀已验证开发经验，供 Skill 更新 | 必须 | 可输入 Chat/Doc/Code Blob，并可检索事件 | [^blob-model][^event-controller] | 部分满足 | 不能原生识别 Skill 缺口、生成 Git 修改候选、绑定测试证据或发起审批。 |
-| 接收完整原始开发会话 | 必须 | `ChatBlob`可承载完整 user/assistant 消息；Blob默认处理后删除，可配置保留 | [^memobase-repository][^blob-model] | 部分满足 | 能存输入，但 Claude Code JSONL、工具调用、文件 diff、权限和人工上传确认需自研适配器与策略。 |
-| 支持多个 Agent | 期望 | 输入消息采用 OpenAI-compatible role/content，Blob类型较通用 | [^blob-model][^memobase-repository] | 部分满足 | 没有原生 Claude Code、Codex、Cursor 适配器；统一事件模型需由接入层提供。 |
+| 沉淀已验证开发经验，供 Skill 更新 | 必须 | Chat 输入链可生成 Profile/Event；其他 Doc/Code 类型的完整处理未由当前源码确认 | [^blob-model][^event-controller] | 部分满足 | 不能原生识别 Skill 缺口、生成 Git 修改候选、绑定测试证据或发起审批。 |
+| 接收完整原始开发会话 | 必须 | `ChatBlob`可承载 user/assistant 消息；处理完成后默认清理 ChatBlob，可配置保留 | [^memobase-repository][^blob-model] | 部分满足 | 能存输入，但 Claude Code JSONL、工具调用、文件 diff、权限和人工上传确认需自研适配器与策略。 |
+| 支持多个 Agent | 期望 | Chat 输入采用 OpenAI-compatible role/content；模型类型声明较通用，但实际抽取映射仍以 Chat/Summary 为主 | [^blob-model][^memobase-repository] | 部分满足 | 没有原生 Claude Code、Codex、Cursor 适配器；统一事件模型需由接入层提供。 |
 | 用户选择后再上传/可控隐私 | 期望 | API token、项目/用户边界，Blob可配置是否保留 | [^api-overview][^server-readme] | 部分满足 | 访问认证存在，但本地筛选、明确确认、脱敏预览和上传审计未由核心提供。 |
 | 模型 API 可切换 | 必须 | `llm_base_url`支持 OpenAI SDK 兼容服务；embedding支持 OpenAI-compatible/Jina/Ollama，可关闭 | [^server-readme][^config-env] | 满足 | 公司兼容 API、DeepSeek 兼容网关和本地服务可作为验证对象；需单独确认模型的结构化输出兼容性。 |
 | 事件时间线与相关事件查询 | 必须 | UserEvent/UserEventGist带时间，支持时间范围、标签和可选向量检索 | [^best-practices][^event-controller][^database-model] | 满足 | 事件语义查询在启用 embedding 时成立；关闭 embedding 后仍可走时间/标签路径。 |
@@ -176,8 +207,8 @@ Apache-2.0许可允许内部使用、修改和分发，但需要保留许可证�
 
 1. 在 `src/server`复制 `.env.example`为 `.env`，设置 PostgreSQL、Redis、API 端口、项目标识和访问 token；复制 `api/config.yaml.example`，设置 LLM、Profile 槽位和可选 embedding。[^server-readme][^config-env]
 2. 启动 `docker-compose build && docker-compose up`，等待 PostgreSQL 和 Redis 健康检查通过；也可以复用已有 PostgreSQL/Redis，仅用官方 Memobase容器运行核心 API。[^server-readme][^docker-compose]
-3. 用 `MemoBaseClient`或 HTTP API 创建/获取用户，按项目用户 ID 插入经过授权的 `ChatBlob`、`DocBlob`或`CodeBlob`；每条消息尽量保留 `created_at`，以便构建事件时间线。[^memobase-repository][^best-practices]
-4. 在开发会话关闭、任务完成或达到批处理边界时调用 `flush`，等待 Profile/Event 更新完成；若要保留原始会话供审计，应在配置中关闭默认的 Blob 清理行为，并设置数据库备份与保留策略。[^memobase-repository][^best-practices]
+3. 用 `MemoBaseClient`或 HTTP API 创建/获取用户，按项目用户 ID 插入经过授权的 `ChatBlob`；模型虽声明 `DocBlob`/`CodeBlob`，但其完整处理链需另行确认。每条消息尽量保留 `created_at`，以便构建事件时间线。[^memobase-repository][^best-practices]
+4. 在开发会话关闭、任务完成或达到批处理边界时调用 `flush`，等待 Profile/Event 更新完成；若要保留原始 ChatBlob 供审计，应在配置中开启 `persistent_chat_blobs`，并设置数据库备份与保留策略。[^memobase-repository][^best-practices]
 5. 后续 Agent 请求调用 Profile API 或 Context API，按主题、token 数和时间范围控制注入内容；经验分析器可用 Event/Gist API 查询候选事件，再将人工确认结果写入 Skill 仓库。[^best-practices][^api-overview]
 
 ### 日常使用方式
@@ -215,7 +246,7 @@ Memobase输入协议不是 Claude Code 原始会话协议。工具调用、权�
 ### 生产化仍需考虑
 
 - 替换示例中的默认密码和 `ACCESS_TOKEN`，将 API 放在内网反向代理之后，并补充 TLS、访问控制、项目隔离和密钥轮换；示例配置中的 `ACCESS_TOKEN="secret"`只能用于本地验证。[^config-env][^api-overview]
-- 为 PostgreSQL和 Redis目录做备份、恢复演练和容量监控；同时决定原始 Blob、Profile、Event、Event Gist的保留期。默认删除 Blob有隐私收益，但会削弱完整会话回放能力。[^memobase-repository][^docker-compose]
+- 为 PostgreSQL和 Redis目录做备份、恢复演练和容量监控；同时决定原始 ChatBlob、Summary Blob、Profile、Event、Event Gist的保留期。默认删除处理完成的 ChatBlob 有隐私收益，但会削弱完整会话回放能力。[^memobase-repository][^docker-compose]
 - 对发往公司 API、DeepSeek 或其他外部兼容接口的内容做数据分级，明确哪些原始会话可上传；Memobase配置支持切换端点，但没有替团队完成数据出境审批或内容脱敏。[^server-readme]
 - 记录 Profile 更新所引用的会话 ID、时间范围和 Agent 类型。官方模型有 UUID 和时间戳，但完整的消息级 provenance、人工确认和 Skill 提交记录需在外围数据库或 Git 中维护。[^database-model][^response-model]
 
@@ -230,7 +261,7 @@ Memobase直接提供了本试点需要的结构化 Profile、事件时间线、�
 ### 已满足能力
 
 - 通过 Profile topic/sub-topic 和 `config.yaml`限制 Memory 范围，适合把业务术语、规则和技术约束分成项目可控的槽位。[^profile-fundamentals][^best-practices]
-- 通过 UserEvent、Event Gist、创建时间、标签和可选 embedding保存并查询事件时间线。[^database-model][^event-controller][^best-practices]
+- 通过 UserEvent、从 event_tip 切出的 Event Gist、创建时间、标签和可选 embedding保存并查询事件时间线。[^database-model][^event-controller][^best-practices]
 - 通过 `llm_base_url`和 embedding provider配置切换公司兼容 API、DeepSeek兼容网关或本地服务；具体模型的结构化输出质量仍需 POC 验证。[^server-readme][^config-env]
 - 通过官方 Compose运行 API、PostgreSQL/pgvector和 Redis，部署规模与一台内网服务器的试点边界相符。[^docker-compose][^server-readme]
 - 通过 Apache-2.0开源核心自部署，避免把 Memory 核心强制绑定到 Memobase云端；云端和附加 UI需另行确认。[^memobase-license][^memobase-repository]

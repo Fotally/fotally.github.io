@@ -44,7 +44,7 @@ MemU 的核心判断是：让连接的 Agent 负责“理解和写作”，让�
 
 ### Memory 实现方式
 
-宿主 Agent 通过 adapter/job 从会话中判断要保存的事实或 Skill，并写成 Markdown 文件；`MemoryService` 为文件和片段建立元数据、作用域与 Embedding，保存到 SQLite 或 PostgreSQL/pgvector。后续 Agent 用 `retrieve` 做向量检索，返回原文件内容；MemoryService 不负责聊天式总结或事实判断。对外部输入也可使用 developer memorize API，把规范化消息、tool call 和 tool result 交给 prepare/commit 流程；该流程仍把原始 transcript 作为临时提炼输入，而不是原文归档。[^memu-service][^memu-readme][^memu-developer][^memu-input]
+宿主 Agent 通过 adapter/job 从会话中判断要保存的事实或 Skill，并写成 Markdown 文件；`MemoryService` 为文件和片段建立元数据、作用域与 Embedding，保存到 SQLite 或 PostgreSQL/pgvector。后续 Agent 用 `retrieve` 做向量检索；底层检索 API 返回文件记录，而宿主侧 `retrieve` 对可映射 track 通常返回镜像文件的 `path`，需要时再读取完整内容，无法映射的文件才内联返回 `content`。MemoryService 不负责聊天式总结或事实判断。对外部输入也可使用 developer memorize API，把规范化消息、tool call 和 tool result 交给 prepare/commit 流程；该流程仍把原始 transcript 作为临时提炼输入，而不是原文归档。[^memu-service][^memu-readme][^memu-developer][^memu-input]
 
 ### 关键设计选择
 
@@ -126,6 +126,82 @@ flowchart LR
 ### 最终输出
 
 正常使用时，未来 Agent 得到与当前问题相关的 memory 或 skill Markdown，并将其放入自己的上下文。对本项目而言，最有价值的输出不是一条不可追溯的摘要，而是“可读 Skill 文件 + 来源会话/任务标识 + 可在后续会话检索的索引”。不过来源会话、审批状态和 Git PR 关系需要由团队在 MemU 之外保存，不能从 RecallFile 自动推断。
+
+### 3.1 源码实现核验（官方 `main`）
+
+> 本节按官方仓库 `main` 的提交 `385bdb30cda7f5265368934b8008ce2b73283283` 核验，重点区分“概念上的 record/inject seam”和源码中真正存在的函数。源码没有一个名为 `Agentic write` 的独立 API；所谓 Agentic write 是外部 Agent 执行 job、写 Markdown，再由 MemU 读取变更并提交的组合流程。[^memu-source-cli][^memu-source-pipeline][^memu-source-instructions]
+
+#### 术语与真实入口
+
+| 报告中的概念 | 官方源码真实入口 | 实际职责 | 不应作的推断 |
+| --- | --- | --- | --- |
+| record | `src/memu/hosts/bridging/transcripts.py::prepare_transcripts`；宿主命令由 `src/memu/hosts/host_cli.py::_cmd_prepare` 接入 | 发现会话、按宿主游标读取新增记录、生成 memory/full 两种临时 JSONL，并把新游标写到 `.pending` | 不是一个独立的 `record()` API，也不是原始会话归档服务 |
+| prepare | `src/memu/hosts/bridging/pipeline.py::prepare`；开发者输入路径另有 `app/memorize/lifecycle.py::prepare_memorize` | 镜像当前 RecallFile、建立内容快照、生成编号 job；或把 `MemorizeInput` 投影为临时 transcript 后生成 job | 不负责让 LLM 自动总结；中间的自演化是外部 Agent 工作 |
+| commit | `pipeline.py::commit`、`app/memorize/lifecycle.py::commit_memorize` | 对 Markdown 工作区做快照 diff，读取 RecallFile/Resource，调用 `commit_results`，成功后推进状态并清理临时文件 | 不是事务性 Git commit，也没有人工审批或质量门禁 |
+| retrieve | `src/memu/hosts/retrieval.py::retrieve`，内部调用 `AgenticMixin.progressive_retrieve` | 单次查询 Embedding 后返回 segments/files/resources，并把可镜像的文件写回 `~/.memu/memory` 或 `~/.memu/skill` | 不是 LLM 重排、意图路由或摘要生成 |
+| inject | `src/memu/hosts/instruction.py::install`、`patch`、`install_skill`；真正执行查询的仍是 `retrieval.py::retrieve` | 在 `CLAUDE.md`/`AGENTS.md` 等宿主指令中安装受 marker 管理的检索规则，或安装 `memu-retrieve/SKILL.md` | 没有一个独立的 `inject()` 函数；inject 是“指令文件指向 retrieve”的接入 seam |
+
+#### record/prepare：两种输入路径和游标语义
+
+宿主 bridging 路径的核心在 `prepare_transcripts`。它按 `TranscriptSource.discover()` 的最新修改时间倒序扫描，调用 `read_incremental(path, previous)` 解释每个会话的游标；对已有且未变化的区域会停止向更旧文件扩展，对有新增记录的会话按 `max_jobs` 截取，最后以旧到新的顺序写出 `<idx>.jsonl`（仅消息）和 `<idx>_full.jsonl`（消息加工具调用/结果）。`_split` 只保留 `RecordKind.MESSAGE` 和 `RecordKind.TOOL`，其他类型丢弃。[^memu-source-transcripts][^memu-source-base]
+
+Claude Code 的 `ClaudeCodeTranscriptSource` 将 `~/.claude/projects` 作为根目录，递归发现顶层和 subagent JSONL；`classify` 交给 `classify_claude_record`，`sanitize` 从记录和嵌套 message 中移除若干私有元数据。当前实现把文本或普通 user message 视为 conversation，把 `tool_use`/`tool_result` 视为 tool；仅含 `thinking` 的记录会被排除，但同时含 `text` 与 `thinking` 的多块记录按 conversation 保留，投影中仍可能包含原始 `thinking` block；`isMeta`、system、summary 等记录则不是挖掘输入。它仍然是对宿主本地日志的筛选投影，不是完整日志的独立副本。[^memu-source-claude-session][^memu-source-claude-records]
+
+游标不会在 `prepare` 阶段直接成为 durable 状态：`prepare_transcripts` 将推进后的 manifest 写入 `session_manifest_pending`，`pipeline.commit` 只有在 `backend.commit_results` 成功后才用 `os.replace` 将其提升为正式 manifest。成功提交后，`pipeline.commit` 删除 `jobs/*.txt`、`sessions/*.jsonl` 和资源临时日志；中途失败则保留这些材料，以便下一轮 leftovers 重试。这是“成功后推进游标”的可靠性设计，但不是原始 transcript 保留策略。[^memu-source-transcripts][^memu-source-pipeline]
+
+开发者显式输入路径则使用 `MemorizeInput`：schema 版本固定为 `1.0`，至少一个 `MessageInput`，还可包含 `ToolCallInput` 和 `ToolResultInput`。`project_memory` 只保留 user/assistant 消息，`project_skill` 保留全部有序事件；`materialize_memorize_input` 将两种投影写为 `input/1.jsonl` 和 `input/1_full.jsonl`。`commit_memorize` 成功后删除这些 JSONL、job、resource 文件和 active-run marker，因此它们是提炼工作区，不是 canonical transcript store。[^memu-source-input][^memu-source-materialize][^memu-source-lifecycle]
+
+#### Agentic write：Agent 写作，MemU 只接收结果
+
+`prepare_instruction_jobs` 生成的 memory/skill job 是实际的 Agent 写作契约：
+
+- memory job 读取只含消息的 transcript 和已有 memory 文件，按“do nothing / patch existing / create new”三选一；
+- skill job 读取含工具调用和工具结果的 full transcript，按同样的三选一规则创建或修改 Skill，并额外扫描 Agent 在本次会话中创建或更新的资源路径；
+- memory job 编号在前，skill job 编号在后，资源描述 job 最后，数字顺序是有意的依赖关系；“不产生文件”是正常结果，不会强迫每次会话生成记忆。
+
+写作约束主要来自模板，而非 Python 类型系统：文件应为带简单 YAML-like frontmatter 的 Markdown，至少包含 `name` 和 `description`。`write_recall_file` 将已有结果镜像为 `---/name/description/--- + body`；`read_recall_file` 再以逐行 `key:value` 方式读回，track 从父目录推断，文件正文不经过完整 YAML schema 校验。[^memu-source-instructions][^memu-source-recall-files]
+
+因此，外部 Agent 拥有“是否写、写哪个文件、如何组织正文”的判断权，而 `MemoryService` 不调用聊天 LLM，也不验证事实、重复问题、证据充分性或 Skill 可执行性。源码中没有来源片段、反例、回归任务、人工 reviewer、Git PR 或发布状态的内置字段/门禁；这些必须在 job 模板之外建立治理层。[^memu-source-service][^memu-source-agentic]
+
+#### commit/RecallFile/RecallFileSegment：文件级与搜索级分离
+
+`AgenticMixin.commit_results` 的顺序是 **plan → 一次性准备 Embedding → write**。它对同一批提交中的重复文本去重并批量请求 Embedding；Embedding provider 失败时不会启动写入，便于整体重试。但每个 repository 调用各自提交事务，数据库写入中途失败没有全局 rollback，先写成功的文件/片段会保留。[^memu-source-agentic]
+
+写入规则由 `_plan_recall_files`、`_plan_segments`、`_write_recall_files` 和 `_commit_segment_texts_for_file` 实现：
+
+- 新 `RecallFile` 的文件级向量使用 `name: description`；已有文件只有 description 改变时才重嵌入，content 每次都会按提交值更新。
+- `skill` track 生成一个 `name: ...\ndescription: ...` 的整文件 segment。
+- `memory` track 按正文逐行生成 segment，跳过空行和 Markdown heading，并按首次出现顺序去重；消失的旧 segment 删除，未变化的 segment 保留原向量，只有新增文本需要 Embedding。
+- `RecallFile` 的 key 是 `(track, name)`；同一请求内重复 key 取最后一项。`track` 是普通字符串，默认 `memory`，不是受限 enum。
+
+模型定义在 `src/memu/database/models.py`：`RecallFile` 有 `name/track/description/content/embedding`，`RecallFileSegment` 有 `recall_file_id/track/text/embedding`。Segment 没有 ordinal/位置字段，track 是冗余保存且随文件重切片重建；Resource、RecallFile、RecallFileSegment 的 embedding 都只是 `list[float] | None`，没有 provider、model、dimension、归一化版本或生成时间元数据。[^memu-source-agentic][^memu-source-models]
+
+#### retrieve/inject：无 LLM 的渐进召回和受控指令安装
+
+`progressive_retrieve` 先将 query Embedding 一次，然后按配置检索 segment 和 workspace resource：segment 命中按向量分数返回，file 结果只是把命中的 segment 按所属 RecallFile 做最高分 roll-up，不再进行第二次文件级语义搜索；不做意图分类、充分性判断或摘要。`retrieval.retrieve` 再通过 `_shape_for_agent` 将内部 UUID 换成 `source_file`，对已知 track 的文件使用原子写入镜像并返回 `path`，而不是把完整 content 放进每次注入；无法映射的 track/name 才保留 inline content。[^memu-source-agentic][^memu-source-retrieval]
+
+`instruction.install` 只替换或追加 memU 自己的 marker block，marker 外的用户指令保持不动，并为旧版本目标提供迁移/删除逻辑；支持 skills 的宿主把详细流程写入 `memu-retrieve/SKILL.md`，`CLAUDE.md` 只保留两句指针。安装时先写 skill 再写指令，卸载时反向进行，以避免出现“指令指向不存在的 skill”。但这仍是提示词级注入：源码没有证明宿主一定执行了 retrieve，也没有把召回内容隔离到不可篡改的系统消息或权限域。[^memu-source-instruction]
+
+#### Embedding 的真实边界
+
+`MemoryService` 在 `service.py` 中组合 pluggable database 和 `ClientPool`，只建立 Embedding client；其类文档明确声明 MemoryService 是 embedding-only，唯一的模型调用是索引和向量搜索所需的 Embedding。当前 provider 默认表在 `embedding/defaults.py` 中登记 `openai`、`jina`、`voyage`、`doubao`、`openrouter`，没有 DeepSeek；provider 默认模型和 endpoint/key 环境变量由该表及 `EmbeddingConfig` 解析。[^memu-source-service][^memu-source-embedding-defaults]
+
+这意味着：
+
+1. 查询路径至少需要一次可用的 Embedding 调用；关闭 file/resource layer 只能改变检索层，不能把 query embedding 变成零依赖。
+2. 公司 OpenAI-compatible `/embeddings` 网关可以沿 `provider=openai` + 自定义 base URL 接入，但必须验证请求格式、批量限制、返回向量数和维度；聊天模型接口不能代替 Embedding。
+3. 由于模型记录没有 embedding provenance，切换 provider/model/dimension 的索引迁移、重建和兼容性检查必须由外部流程负责，不能从 RecallFile 本身追溯。
+
+#### 源码核验后的治理限制
+
+- **没有完整原始会话归档。** 原始 Claude Code JSONL 留在宿主目录；MemU 只筛选、脱敏并写临时 projection，成功 commit 后清理 projection。若要求用户逐条选择、保存、下载、删除和回放完整原文，需要单独的 uploader/object store/审计模型。
+- **没有语义质量和人工发布门禁。** Agent 可以选择 no-op，也可以直接 patch/create Markdown；`commit_results` 只验证可提交的数据形态和 Embedding/storage 流程，不验证事实真伪、来源完整性、反例、测试通过或 Skill 是否安全可复用。
+- **来源与权限字段不足。** RecallFile/Segment 没有 session/message/tool-call provenance、项目/commit、有效期、审批状态或 reviewer 字段；`where` 只按配置的 user model 校验，track 也不是 ACL。共享 PostgreSQL 不能自动变成团队多租户权限系统。
+- **提交的失败语义不对称。** Embedding 失败发生在写入前，整批不写；数据库写入失败可能留下部分结果。调用方需要幂等 key、失败重试和对账，而不能只依据 CLI 退出码判断“没有任何数据落库”。
+- **输入是 Agent 将要读取和执行的内容。** job 模板要求外部 Agent 读取 transcript、已有 Markdown 并执行资源验证命令；源码没有为 transcript 内容提供独立的可信边界、隔离执行环境或人工确认，因此应把会话内容和生成的 Markdown 当作不可信输入，限制宿主权限。
+- **retrieve 不是保证性注入。** `instruction.py` 只维护指令文件/skill；提示词允许空结果时由 Agent 正常继续，宿主未执行该指令时也不会有 MemU 层面的强制保证。检索命令或后端异常则由 CLI 报错并重新抛出，是否继续由宿主 Agent 决定。因此不能把“安装了 inject”当作“每次回答都使用了 Memory”。
+
+对本项目的结论是：MemU 的源码确实落地了“宿主增量记录 → job 驱动 Agent 写 Markdown → 快照 diff commit → Embedding 分层检索 → 指令文件引导 retrieve”的 sidecar 管线；但原始会话证据、跨项目/跨成员授权、来源链、人工 Skill 发布和 Embedding 迁移治理仍在管线之外。报告中应把 `record`/`inject` 写成接入 seam，把 `prepare`/`commit` 写成真实生命周期函数，而不要把 MemU 描述成已经提供集中会话归档和自动 Skill 审核的平台。[^memu-source-pipeline][^memu-source-retrieval][^memu-source-agentic]
 
 ## 4. 与需求画像逐项对照
 
@@ -290,3 +366,20 @@ DeepSeek 作为聊天模型能否承担自演化步骤取决于能否通过 gene
 [^memu-models]: [memU 数据库模型源码](https://github.com/NevaMind-AI/memU/blob/main/src/memu/database/models.py)
 [^memu-cloud-adr]: [memU ADR 0012：Cloud backend 与 workspace resource 边界](https://github.com/NevaMind-AI/memU/blob/main/docs/adr/0012-cloud-backed-agentic-backend.md)
 [^memu-beta-pyproject]: [memU v2.0.0-beta.0 的 Python 版本要求](https://github.com/NevaMind-AI/memU/blob/v2.0.0-beta.0/pyproject.toml)
+[^memu-source-cli]: [memU 官方 host CLI：prepare/commit/retrieve/install-instruction 命令注册](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/hosts/host_cli.py)
+[^memu-source-pipeline]: [memU 官方 bridging pipeline：prepare/commit、游标提升与临时文件清理](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/hosts/bridging/pipeline.py)
+[^memu-source-transcripts]: [memU 官方通用 transcript bridge：prepare_transcripts、_split 与 pending cursor](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/hosts/bridging/transcripts.py)
+[^memu-source-base]: [memU 官方 TranscriptSource/RecordKind 契约与增量读取](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/hosts/base.py)
+[^memu-source-claude-session]: [memU 官方 Claude Code transcript source：发现、分类和 sanitize](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/hosts/claude_code/sessions.py)
+[^memu-source-claude-records]: [memU 官方 Claude Code record 分类实现](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/hosts/claude_records.py)
+[^memu-source-input]: [memU 官方 MemorizeInput、project_memory 和 project_skill](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/app/memorize/input.py)
+[^memu-source-materialize]: [memU 官方 developer input projection：materialize_memorize_input](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/app/memorize/materialize.py)
+[^memu-source-lifecycle]: [memU 官方 developer memorize lifecycle：prepare_memorize/commit_memorize](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/app/memorize/lifecycle.py)
+[^memu-source-instructions]: [memU 官方 self-evolve job templates：memory/skill Agent 写作规则](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/hosts/bridging/instructions.py)
+[^memu-source-recall-files]: [memU 官方 Markdown recall file mirror：write_recall_file/read_recall_file](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/hosts/bridging/recall_files.py)
+[^memu-source-agentic]: [memU 官方 AgenticMixin：progressive_retrieve/commit_results 与 segment 规划](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/app/agentic.py)
+[^memu-source-models]: [memU 官方 RecallFile/RecallFileSegment/Resource 模型](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/database/models.py)
+[^memu-source-retrieval]: [memU 官方 retrieve seam：_shape_for_agent 与 host-facing 输出](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/hosts/retrieval.py)
+[^memu-source-instruction]: [memU 官方 inject seam：instruction install/patch/install_skill/refresh](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/hosts/instruction.py)
+[^memu-source-service]: [memU 官方 MemoryService：embedding-only service composition root](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/app/service.py)
+[^memu-source-embedding-defaults]: [memU 官方 Embedding provider defaults](https://github.com/NevaMind-AI/memU/blob/385bdb30cda7f5265368934b8008ce2b73283283/src/memu/embedding/defaults.py)

@@ -40,7 +40,7 @@ Graphiti 用“实体 + 带有效期的事实关系 + 原始 Episode + 可选本
 
 ### Memory 实现方式
 
-每次 `add_episode` 先保留原始 `EpisodicNode`，再由 LLM 抽取 `EntityNode` 与带来源的 `EntityEdge`；边同时记录 `valid_at`、`invalid_at` 等时间状态。节点、边和 Episode 建立向量/全文索引，查询时融合语义、关键词、图遍历和重排；新事实通过失效旧边完成增量更新。[^graphiti-repository]
+每次 `add_episode` 先在内存中构造或读取原始 `EpisodicNode`，完成抽取、去重和属性处理后再统一写入；批量 `add_episode_bulk` 则会在抽取前先保存 Episode 节点。边同时记录 `valid_at`、`invalid_at` 等时间状态。节点、边和 Episode 建立向量/全文索引，查询时融合语义、关键词、图遍历和重排；新事实通过失效旧边完成增量更新。[^graphiti-repository]
 
 ### 关键设计选择
 
@@ -97,6 +97,54 @@ flowchart LR
 ### 最终输出
 
 调用方获得混合检索结果，可进一步读取节点、关系和来源 Episode。对 Skill 更新来说，结果可以回答“旧规则是什么、何时被哪个会话替代、证据在哪”，但候选 Markdown/代码修改和评审仍由外部系统生成。
+
+### 源码实现核验：记忆抽取与持久化
+
+> **核验口径**：以下不是对 README 的转述，而是对官方仓库 `getzep/graphiti` 在 `main` 分支提交 `547422865cca9fb5a82915c074d899428c145ff4`（2026-09-04 UTC）的静态源码核验；未安装、未运行。源码中没有明确支持的能力标为“未确认”，不能把接口字段自动等同于已持久化能力。[^graphiti-source-commit]
+
+#### 1. Episode 写入链路
+
+- **单条写入入口**是 `graphiti_core/graphiti.py` 的 `Graphiti.add_episode(...) -> AddEpisodeResults`。输入包括 `name`、`episode_body`、`source_description`、`reference_time`，以及 `source`、`group_id`、可选 UUID、实体/边本体、前序 Episode 和 saga 参数；返回 `episode`、`episodic_edges`、`nodes`、`edges`、`communities`、`community_edges`。函数实际先在内存中构造 `EpisodicNode`，再依次执行 `extract_nodes`、`resolve_extracted_nodes`、`_extract_and_resolve_edges`、节点属性抽取，最后进入 `_process_episode_data`。因此“单条 add_episode 先持久化原始 Episode，再抽取”并不成立；单条路径是在抽取/解析后统一写入。[^graphiti-source-graphiti]
+- `EpisodicNode` 的核心字段是 `uuid`、`name`、`group_id`、`source`、`source_description`、`content`、`created_at`、`valid_at` 和 `entity_edges`。新建 Episode 的 `created_at` 取本次处理开始时的时间，通常早于最终图写入；传入已有 UUID 时沿用已读取对象的值。`valid_at` 来自调用方 `reference_time`。源码没有把 Episode 更新解释为版本化对象；同 UUID 的 `MERGE`/覆盖语义应按具体后端查询理解。[^graphiti-source-nodes][^graphiti-source-episode-query]
+- `_process_episode_data` 调用 `build_episodic_edges`，为每个被保留的实体建立 `Episodic -[:MENTIONS]-> Entity` 边；同时把本次传入的实体边 UUID 列表写入 Episode 的 `entity_edges`。当 `store_raw_episode_content=False` 时，`content` 在保存前被清空。saga 的 `HAS_EPISODE`、`NEXT_EPISODE` 边是在这次核心批量写入之后另行保存，因此不应把 saga 关系视为与全部写入始终同一原子事务。[^graphiti-source-graphiti][^graphiti-source-edge-ops]
+- **批量入口**是 `Graphiti.add_episode_bulk(bulk_episodes: list[RawEpisode], ...) -> AddBulkEpisodeResults`。`RawEpisode` 只有 `name`、可选 `uuid`、`content`、`source_description`、`source` 和 `reference_time`。批量路径会先通过 `add_nodes_and_edges_bulk` 保存 Episode 节点，再取上下文、抽取/去重实体和边，最后再次保存解析后的节点和边；所以后续 LLM 或解析失败时，前一阶段已写入的 Episode 可能保留。源码建议 Episode 按顺序追加并等待前一个完成，批量规模也需由调用方限流。[^graphiti-source-graphiti][^graphiti-source-bulk]
+- `add_nodes_and_edges_bulk` 在默认驱动路径中打开 driver session，并用 `execute_write(add_nodes_and_edges_bulk_tx, ...)` 在一个写事务中提交 Episode、实体节点、`MENTIONS` 边和实体边；这只覆盖该次 bulk save，不覆盖抽取阶段，也不覆盖随后单独保存的 saga 关系。具体 `graph_operations_interface` 实现的事务细节未确认。[^graphiti-source-bulk]
+
+#### 2. 实体与关系抽取
+
+- 单条 `add_episode` 的默认代码路径是分离抽取：`graphiti_core/utils/maintenance/node_operations.py::extract_nodes(...) -> (list[EntityNode], node_episode_index_map)`，再由 `edge_operations.py::extract_edges(...) -> list[EntityEdge]` 生成关系。前序 Episode 只作为 LLM 上下文；节点抽取会生成节点名称、标签和空摘要，边抽取会校验端点名称、事实文本、自环和日期字段，并把 `episode_indices` 映射成 Episode UUID；`relation_type` 主要由结构化响应模型和提示词约束，当前函数未显式校验其是否属于允许的关系类型集合。[^graphiti-source-node-extract][^graphiti-source-edge-extract]
+- `EntityEdge` 保存 `source_node_uuid`、`target_node_uuid`、关系 `name`、事实 `fact`、`episodes`、`reference_time` 及 `valid_at`、`invalid_at`、`expired_at`。边对象的 `created_at` 在抽取阶段设置，通常早于最终图写入；`reference_time` 默认取被归因 Episode 的 `valid_at`，不是事实生效时间本身。空事实、找不到端点以及解析为同一节点的自环会被丢弃。[^graphiti-source-edge-model][^graphiti-source-edge-extract]
+- 另有 `combined_extraction.py::extract_nodes_and_edges(...)` 路径，一次 LLM 结构化输出同时得到实体和边，再用 `BatchEdgeTimestamps` 额外抽取时间；它会按边归因 Episode，并删除没有任何边连接的孤立节点。该函数是 bulk/组合抽取能力，不能据此断言单条 `add_episode` 默认总是单次联合抽取。批量时间返回数量不匹配或时间解析失败时，源码记录 warning/debug，仍可能返回没有完整时间字段的边。[^graphiti-source-combined]
+
+#### 3. 去重、冲突和失效
+
+- **节点去重**：`resolve_extracted_nodes(...)` 先为节点名称生成 Embedding，在同一 `group_id` 内最多取 15 个候选，余弦阈值常量为 `0.6`；随后用 `dedup_helpers.py` 的规范化名称、候选索引和相似度逻辑确定可直接解析的节点，未解决的节点交给一次 `NodeResolutions` LLM 结构化判断。输出是“解析后的节点列表、抽取 UUID 到规范 UUID 的映射、重复节点对”，函数本身不写数据库。规范节点主要复用已有 UUID；源码可做标签提升，但没有在此处合并任意属性、摘要或时间字段。[^graphiti-source-node-resolve][^graphiti-source-dedup]
+- **边去重**：`resolve_extracted_edges(...)` 先按“源 UUID、目标 UUID、规范化 fact”对本批边保留首个条目，再查同端点已有边和更宽的失效候选。`resolve_extracted_edge(...)` 对完全相同端点和 fact 走无 LLM 快速复用路径；非精确匹配时调用 `dedupe_edges.resolve_edge`，其 `EdgeDuplicate` 输出 `duplicate_facts`（只能指向同端点候选）和 `contradicted_facts`（可指向两类候选）。输出三元组分别是解析边、被失效边和本次新边。LLM 返回越界索引时只记录 warning 并忽略，不会自动修复判断。[^graphiti-source-edge-resolve][^graphiti-source-dedupe-edge]
+- **冲突失效不是删除**：当新事实的 `valid_at` 晚于候选事实且时间区间没有被既有 `invalid_at` 保护时，`resolve_edge_contradictions` 把旧边的 `invalid_at` 设为新事实的 `valid_at`，并把 `expired_at` 设为当前时间；如果候选的 `valid_at` 晚于新边，新边也可能被立即标记 `invalid_at`/`expired_at`。对进入完整解析路径、且被作为当前 `resolved_edge` 处理的边，已有 `invalid_at` 而没有 `expired_at` 时会尝试补当前时间；完全重复边的快速复用路径会直接返回，因此不能保证所有边都被补值。这些只是内存对象的状态更新，随后随 `resolved_edges + invalidated_edges` 一起保存。[^graphiti-source-edge-resolve]
+- 因而 Graphiti 的“冲突解决”是**面向事实边、依赖 LLM 分类和时间比较的增量失效**，不是数据库唯一约束，也不是对任意属性的通用合并。相同端点、不同事实的边是否构成矛盾取决于 LLM 的结构化判断和可用候选集；该判断质量、候选召回和时间抽取失败都是限制。[^graphiti-source-edge-resolve][^graphiti-source-dedupe-edge]
+
+#### 4. 时间字段和来源持久化的真实边界
+
+| 对象 | 源码字段/写入位置 | 真实含义 | 核验限制 |
+| --- | --- | --- | --- |
+| `EpisodicNode` | `created_at`、`valid_at` | 对象构造/处理开始时间（通常早于最终持久化）、原始事件/文档参考时间 | 没有自动推断更精细的事件时间 |
+| `EntityEdge` | `created_at`、`reference_time`、`valid_at`、`invalid_at`、`expired_at` | 边对象抽取时间（通常早于最终持久化）、来源 Episode 的参考时间、事实生效/失效时间、图中执行失效的时间 | 时间抽取是 LLM 辅助且可失败；字段为空并不等于事实永远有效 |
+| Episode 来源 | `source`、`source_description`、`name`、`content`、`group_id`、`entity_edges`，以及 `MENTIONS` 边 | 保留来源类型/文字描述、原始正文（可配置关闭）、分组和派生边关联 | 没有核心字段保证外部文件 ID、提交者、权限、不可变对象版本或原始存储地址 |
+
+`EpisodicNode` 模型虽然声明了 `episode_metadata`（客户自定义过滤元数据），但默认 `EpisodicNode.save()` 的 `episode_args`、Episode 保存查询模板和返回投影均未包含该字段；通过 `graph_operations_interface` 的替代实现是否持久化它，当前源码未确认。因此不能把该字段当成默认后端可用的来源索引。[^graphiti-source-nodes][^graphiti-source-episode-query]
+
+#### 5. Embedding、全文和图检索
+
+- **Embedding 写入**：`add_nodes_and_edges_bulk_tx` 在 `EntityNode.name_embedding` 或 `EntityEdge.fact_embedding` 为空时，分别调用 `EntityNode.generate_name_embedding` 和 `EntityEdge.generate_embedding`；Episode 本身没有 Embedding 字段。向量字段分别是节点名称和边事实，后端维度由配置的 Embedder 决定。[^graphiti-source-bulk][^graphiti-source-nodes][^graphiti-source-edge-model]
+- **全文索引**：`graph_queries.py::get_fulltext_indices` 为 Episode 建 `content/source/source_description/group_id` 索引，为实体建 `name/summary/group_id` 索引，为关系建 `name/fact/group_id` 索引；Neo4j 使用 `episode_content`、`node_name_and_summary`、`edge_name_and_fact` 等索引名，其他后端由各自查询语法实现。源码事实是后端全文检索索引，不应把“BM25”理解成 Graphiti 自己实现的一套独立评分器。[^graphiti-source-queries]
+- **高层搜索**：`search(...) -> SearchResults` 接收 query、group IDs、`SearchConfig`、`SearchFilters`，可并行返回 `edges`、`nodes`、`episodes`、`communities` 及对应分数。实体/边按配置组合全文、余弦相似度和 BFS 图遍历，并可使用 RRF、MMR、cross-encoder 或中心节点距离重排；Neo4j 的 BFS 沿 `RELATES_TO`/`MENTIONS` 路径扩展。Episode 搜索当前实现调用 `episode_fulltext_search`，不提供 Episode 余弦或 BFS 检索路径。[^graphiti-source-search][^graphiti-source-neo4j-search]
+- **过滤限制**：`group_ids` 会进入检索；边的 `SearchFilters` 支持 `valid_at`、`invalid_at`、`created_at`、`expired_at` 等时间谓词，节点检索当前主要处理 `node_labels`。Episode 全文检索在当前 concrete 实现中忽略 `search_filter`，因此不会应用这些时间谓词。空 query 直接返回空 `SearchResults`；仅在实体、边或社区配置需要余弦相似度或 MMR 时才为 query 调用 Embedder。[^graphiti-source-search][^graphiti-source-filters]
+
+#### 6. 源码核验后的结论
+
+Graphiti 的持久化事实可以具体落到三层：`EpisodicNode` 保存原始输入及其时间/来源描述，`EntityNode` 保存抽取实体与名称向量，`EntityEdge` 保存带 Episode UUID 的事实、事实向量和时间状态；`MENTIONS` 边把 Episode 连到实体，边上的 `episodes` 列表把事实反向关联到来源 Episode。真正的原始来源治理仍在 Graphiti 之外：默认实现没有把外部会话对象、成员身份、授权记录和不可变附件存成一套独立审计模型。
+
+源码同时给出三个不能忽略的限制：一是单条写入的完整操作不是一个可证明的端到端事务，批量路径还会在抽取前先保存 Episode；二是节点/边去重和边冲突分类依赖候选召回、Embedding 和结构化 LLM 输出；三是 Episode 只有全文检索路径，时间字段虽被保存并可用于部分边/节点过滤，但“按任意时点重建完整上下文”仍需调用方组合查询和验证。[^graphiti-source-commit][^graphiti-source-bulk][^graphiti-source-search]
 
 ## 4. 与需求画像逐项对照
 
@@ -226,3 +274,21 @@ Graphiti 的匿名遥测默认启用但可用 `GRAPHITI_TELEMETRY_ENABLED=false`
 [^graphiti-openai-embedder]: [Graphiti OpenAI Embedder：默认模型与 Base URL](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/openai.py)
 [^graphiti-embedder-gemini]: [Graphiti Gemini Embedder：模型与输出维度配置](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/gemini.py)
 [^graphiti-embedder-voyage]: [Graphiti Voyage Embedder：模型配置](https://github.com/getzep/graphiti/blob/main/graphiti_core/embedder/voyage.py)
+[^graphiti-source-commit]: [Graphiti 官方源码核验提交 `547422865cca9fb5a82915c074d899428c145ff4`](https://github.com/getzep/graphiti/commit/547422865cca9fb5a82915c074d899428c145ff4)
+[^graphiti-source-graphiti]: [`graphiti_core/graphiti.py`：`add_episode`、`add_episode_bulk`、`_process_episode_data`](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/graphiti.py#L680-L1482)
+[^graphiti-source-nodes]: [`graphiti_core/nodes.py`：`EpisodicNode`、`EntityNode` 及保存/Embedding](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/nodes.py#L318-L560)
+[^graphiti-source-edge-model]: [`graphiti_core/edges.py`：`EntityEdge` 字段、保存和事实 Embedding](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/edges.py#L263-L359)
+[^graphiti-source-episode-query]: [`graphiti_core/models/nodes/node_db_queries.py`：Episode 保存查询与返回投影](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/models/nodes/node_db_queries.py#L30-L121)
+[^graphiti-source-bulk]: [`graphiti_core/utils/bulk_utils.py`：事务批量写入、RawEpisode 和批量去重](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/utils/bulk_utils.py)
+[^graphiti-source-node-extract]: [`graphiti_core/utils/maintenance/node_operations.py`：`extract_nodes`](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/utils/maintenance/node_operations.py#L70-L333)
+[^graphiti-source-edge-extract]: [`graphiti_core/utils/maintenance/edge_operations.py`：`extract_edges`](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/utils/maintenance/edge_operations.py#L117-L322)
+[^graphiti-source-edge-ops]: [`graphiti_core/utils/maintenance/edge_operations.py`：Episode provenance、边解析与时间失效](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/utils/maintenance/edge_operations.py#L52-L847)
+[^graphiti-source-node-resolve]: [`graphiti_core/utils/maintenance/node_operations.py`：`resolve_extracted_nodes`](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/utils/maintenance/node_operations.py#L627-L707)
+[^graphiti-source-dedup]: [`graphiti_core/utils/maintenance/dedup_helpers.py`：规范化、相似度候选和解析状态](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/utils/maintenance/dedup_helpers.py)
+[^graphiti-source-edge-resolve]: [`graphiti_core/utils/maintenance/edge_operations.py`：`resolve_extracted_edges`、`resolve_extracted_edge` 和冲突失效](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/utils/maintenance/edge_operations.py#L325-L847)
+[^graphiti-source-dedupe-edge]: [`graphiti_core/prompts/dedupe_edges.py`：`EdgeDuplicate` 结构化输出约束](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/prompts/dedupe_edges.py)
+[^graphiti-source-combined]: [`graphiti_core/utils/maintenance/combined_extraction.py`：联合抽取和批量时间解析](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/utils/maintenance/combined_extraction.py#L41-L313)
+[^graphiti-source-search]: [`graphiti_core/search/search.py`：高层搜索、混合召回和 Episode 搜索](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/search/search.py#L98-L761)
+[^graphiti-source-neo4j-search]: [`graphiti_core/driver/neo4j/operations/search_ops.py`：Neo4j 全文、向量和 BFS 查询](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/driver/neo4j/operations/search_ops.py)
+[^graphiti-source-queries]: [`graphiti_core/graph_queries.py`：范围索引、全文索引和余弦相似度表达式](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/graph_queries.py#L28-L179)
+[^graphiti-source-filters]: [`graphiti_core/search/search_filters.py`：时间和边/节点过滤字段](https://github.com/getzep/graphiti/blob/547422865cca9fb5a82915c074d899428c145ff4/graphiti_core/search/search_filters.py)

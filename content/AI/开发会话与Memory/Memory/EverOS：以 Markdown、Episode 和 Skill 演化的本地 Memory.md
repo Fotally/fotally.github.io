@@ -109,6 +109,71 @@ flowchart LR
 
 查询接口返回按项目、用户、Agent、应用和会话过滤的 Episode、事实、案例或 Skill。开发 Agent 可以在任务开始读取项目知识和既有 Skill，在任务结束提交会话并触发 OME；团队则从 Agent Case/Skill 和来源 Episode 中挑选 Skill 更新候选，提交人工评审。
 
+### 官方源码实现核验（2026-09-06）
+
+以下结论不是只依据 README 或架构文档，而是对官方 `main` 分支源码路径的静态核验；本次未安装依赖、未启动服务、未实际调用模型。需要特别区分：`/add`/`/flush` 的请求链负责把 Episode 写入 Markdown，而 OME 的派生抽取通常只是被事件入队，是否已经完成要看 OME run record 或后续索引状态。
+
+#### 1. Buffer、边界检测与 `/flush`
+
+- **规范化不等于缓冲**：`src/everos/memory/extract/ingest/service.py` 的 `process()` 只把外部消息转换成 `CanonicalMessage`，生成稳定 `message_id`、解析时间、工具调用和多模态文本；它不写 `unprocessed_buffer`。
+- **`/add` 的分支在 `src/everos/entrypoints/api/routes/memorize.py`**：普通 `/add` 调用 `memorize(payload, defer_extraction=False)`；设置 `defer_extraction=true` 才只进入缓冲；`/flush` 用空 `messages` 调用 `memorize(..., is_final=True)`，再把 service 的 `extracted` 映射为 `extracted`，否则返回 `no_extraction`。
+- **真正的读—合并—边界—回写在 `src/everos/service/memorize.py` 与 `src/everos/service/_boundary.py`**：`memorize()` 以 `session_id` 获取 asyncio lock，锁覆盖整个 read/merge/detect/tail-write 周期；`buffer_messages()` 从 SQLite `unprocessed_buffer` 按 `(app_id, project_id, session_id, track="memorize")` 读取，按 `message_id` 去重并按 `(timestamp, message_id)` 排序，再调用 `replace()`。`src/everos/infra/persistence/sqlite/repos/unprocessed_buffer.py` 的 `replace()` 在一个事务中执行 scoped delete-then-insert，空列表表示清空该会话缓冲。
+- **`prepare_cells()` 的行为**：非 final 请求没有 user 消息时只保留缓冲；没有 LLM 时返回 `skipped`；普通聊天模式调用 `everalgo.boundary.detect_boundaries`，agent 模式调用 `AgentBoundaryDetector`。无 cell 时把合并片段原样放回 buffer；有 cell 时为每个 cell 写一行 SQLite `memcell` ledger，建立 cell→message ID 映射，将算法返回的 tail 重新写回 buffer，并把同一个 `memcell_id` 交给 user/agent 两条下游管线。`is_final=True` 依赖算法的 final contract 返回空 tail，源码没有额外的本地 assert。
+- **结论**：显式 `defer_extraction` 是“只缓冲”，普通 `/add` 仍可能立即做边界检测和抽取；`/flush` 是强制 final 边界，不是一个单独的 Markdown writer。`unprocessed_buffer` 是会话 staging 数据，不能被 Cascade 从 Markdown 重建。
+
+#### 2. Episode、AtomicFact、Foresight、Profile 与 Agent Skill 的实际抽取链
+
+| 产物 | 事件/策略链 | 官方源码中的关键逻辑 |
+| --- | --- | --- |
+| **Episode** | `UserMemoryPipeline` → `EpisodeExtracted` | `src/everos/memory/extract/pipeline/user_memory.py` 对每个 cell 先发 `UserPipelineStarted`，再用 `EpisodeExtractor.aextract(cell, sender_id=None)` 做一次整 cell 抽取；`ValueError` 最多重试两次并作递增退避，最终一次失败会抛出。提取结果通过 `Episode.from_algo()` 按 cell 内不同 user sender fan-out，每个 owner 写一份 Episode Markdown，并在写成功后发 `EpisodeExtracted`。 |
+| **AtomicFact** | `EpisodeExtracted` → `extract_atomic_facts` | `src/everos/memory/strategies/extract_atomic_facts.py` 使用 `AtomicFactExtractor.aextract_from_text(event.episode_text, timestamp=...)`；结果为空则结束，否则把 `parent_id` 设为 Episode entry ID，并通过一次 `AtomicFactWriter.append_entries()` 批量追加。 |
+| **Foresight** | `UserPipelineStarted` → `extract_foresight` | `src/everos/memory/strategies/extract_foresight.py` 只扫描 `ChatMessage(role="user")`，按 sender 调用 `ForesightExtractor.aextract()`，按 owner 批量写入。策略装饰器明确设置 `enabled=False`；源码注释还说明当前没有搜索路由或 prompt 消费 Foresight，因此默认不花这部分 LLM 成本。 |
+| **Profile** | embedding 可用：`EpisodeExtracted` → profile clustering → `ProfileClusterUpdated` → `extract_user_profile`；无 embedding：`EpisodeExtracted(source="pipeline")` 直达 | `src/everos/memory/strategies/trigger_profile_clustering.py` 对 Episode 文本做 embedding、按几何/时间窗口合并 user cluster，再发 `ProfileClusterUpdated`。`src/everos/memory/strategies/extract_user_profile.py` 用 `applies_to` 保证两条路不重复：cluster 路径从 cluster 成员反查 memcell，Tier-1 direct 路径总是纳入当前 event 的 `memcell_id`，并用 LanceDB timestamp 查询补充历史 memcell；随后读取旧 profile、调用 `ProfileExtractor.aextract()`，最后由 `ProfileWriter.write()` 整体覆盖 `users/<user_id>/user.md`。Reflection 产生的 `EpisodeExtracted(source="reflection")` 不走 direct profile 路径。 |
+| **Agent Case** | agent mode：`AgentMemoryPipeline` → `AgentPipelineStarted` → `extract_agent_case` | `src/everos/memory/extract/pipeline/agent_memory.py` 本身不写 Markdown，只为每个 cell 发事件。`src/everos/memory/strategies/extract_agent_case.py` 收集 assistant-side sender，调用一次 `AgentCaseExtractor.aextract()`；算法返回空列表时跳过，否则把同一 case fan-out 到每个 agent owner，写 Agent Case Markdown，再发 `AgentCaseExtracted`。 |
+| **Agent Skill** | `AgentCaseExtracted` → skill clustering → `SkillClusterUpdated` → `extract_agent_skill` | `src/everos/memory/strategies/trigger_skill_clustering.py` 先检查 embedding，`quality_score < 0.2` 直接跳过，否则 embedding `task_intent`、调用 `cluster_by_llm`、持久化 cluster 并发事件。`src/everos/memory/strategies/extract_agent_skill.py` 从 event payload 重建目标 case，避免等待 Cascade；已有 skill 以 Markdown `AgentSkillReader.list_by_cluster()` 为存在性真相，只有超出 top-K 时才用 LanceDB 做相关性排序，再读取 supporting cases，调用 `AgentSkillExtractor.aextract()`，整文件写回 `SKILL.md`，并清理 rename 后遗留的旧 skill 目录。源码明确写明 retire op 当前不被实现为删除或 retired 标记，不能宣称已具备 Skill 退休能力。 |
+
+`src/everos/memory/events.py` 是上述链路的契约：`EpisodeExtracted` 携带 episode 文本，`AgentCaseExtracted` 携带完整 case 字段，`SkillClusterUpdated` 携带 case vector；这些 event payload 让下游在 Cascade 尚未完成时仍可执行关键抽取，避免把“刚写入 Markdown 但尚未建 LanceDB 索引”误判为不存在。
+
+#### 3. Markdown 写入、覆盖与事实源边界
+
+- **Daily log append**：`src/everos/infra/persistence/markdown/writers/base.py` 的 `BaseDailyWriter.append_entries()` 按 schema 解析路径，在单个 per-path lock 内读取 `entry_count`、分配 `ep_<YYYYMMDD>_<NNNN>` 等 entry ID、渲染 `<!-- entry:... -->` 标记，并一次性更新 frontmatter 后写回。`src/everos/infra/persistence/markdown/writers/episode_writer.py` 将 Episode 绑定为 `users/<scope>/episodes/episode-<YYYY-MM-DD>.md`，并维护 `entry_count`/`last_appended_at`。
+- **Profile 是整文件 upsert**：`src/everos/infra/persistence/markdown/writers/profile_writer.py` 不做 read-modify-write 或字段合并，调用方提供的完整 frontmatter 和 body 会整体替换 `user.md`。因此 Profile 的并发保护在策略层的 owner partition lock，而不是 writer 的追加 entry 语义。
+- **Skill 是命名目录整文件 upsert**：`src/everos/infra/persistence/markdown/writers/agent_skill_writer.py` 写入 `agents/<agent>/skills/skill_<name>/SKILL.md`，`references/*.md` 与 `scripts/*` 单独替换；`scripts` 不进入 Cascade 检索内容。`write_main()` 会覆盖人工编辑的原有主文件，Skill 重命名由策略显式删除旧目录。
+- **原子性与路径安全**：`src/everos/core/persistence/markdown/writer.py` 将目标限制在 MemoryRoot 内，在同目录临时文件上执行写入、flush、fsync，再用 `os.replace` 原子替换；追加操作使用 per-path asyncio lock。其 `patch_frontmatter()` 对 dict 字段做增量合并、标量整体替换，这正是 Reflection 更新 `deprecated_entries` 的入口。
+
+#### 4. Cascade 与索引：Markdown → LanceDB，不负责反向生成 Markdown
+
+- `src/everos/memory/cascade/registry.py` 将 `episode`、`atomic_fact`、`foresight`、`agent_case`、`agent_skill`、`user_profile` 等 kind 绑定到 frontmatter schema、LanceDB schema/repository 和 handler；路径匹配由 registry 统一提供。
+- `src/everos/memory/cascade/watcher.py` 用 watchdog 递归监控 MemoryRoot。回调只把新增/修改/删除/移动转换为相对路径并写入 `md_change_state`，不在文件事件线程中解析 Markdown；`src/everos/memory/cascade/scanner.py` 以 `KIND_REGISTRY` 定期全树扫描，补上 daemon 停机期间或编辑器 move-replace 漏掉的事件。
+- `src/everos/memory/cascade/worker.py` 原子 claim pending rows，按 kind 并发调用 handler；成功标记 done，外部服务错误做有上限的 retry，其他异常进入失败处理。`src/everos/memory/cascade/orchestrator.py` 的 `sync_once()` 是 CLI/补偿路径的 scan + drain；启动时还会把上次崩溃遗留的 processing rows 恢复为 pending。
+- Handler 把 Markdown 结构化内容投影到 LanceDB：`episode.py` 将 Subject/Content 参与 embedding/BM25，`atomic_fact.py` 索引 Fact，`foresight.py` 索引 Foresight 并把 Evidence 作为辅助 BM25，`user_profile.py` 将异构列表 JSON 化，`agent_skill.py` 拼接 `SKILL.md` body 与按文件名排序的 references、排除 scripts。embedding 不可用时各 handler 写入 `vector=None`，仍保留 BM25/标量路径；优化是延迟维护，未索引 tail 仍可被扫描，不应把“未优化”误写成“不可见”。
+
+#### 5. OME 的入队、门控与失败语义
+
+- `src/everos/service/memorize.py` 首次构造 `OfflineEngine` 时注册两组策略：LLM-only 的 AtomicFact/Foresight/AgentCase/Profile，以及需要 embedding 的 clustering/AgentSkill/Reflection。需要 embedding 的策略仍注册，但在策略 body 内自行 no-op；配置能力升级需要重启，body guard 不是热加载机制。
+- `src/everos/infra/ome/engine.py` 的 `emit()` 调用 `_dispatch_event()`：先由 `EventDispatcher.dispatch()` 经过 `enabled`、`applies_to`、可选 Counter gate，再调用 `_enqueue_run()`。它不会等待策略函数执行完成；真正运行由 APScheduler/runner 驱动。
+- `src/everos/infra/ome/_dispatch/dispatcher.py` 明确规定三道 gate；`src/everos/infra/ome/_dispatch/runner.py` 为每次尝试写 RunRecord，执行 `RUNNING → SUCCESS/FAILED/DEAD_LETTER`，失败按快照的 `max_retries` 重试。`engine.wait_for_event()` 会轮询同一 event 的所有 run 到 terminal 状态，Reflection 用它等待合并 Episode 的下游抽取完成。
+- 因此 `/flush` 返回 `extracted` 的强保证是边界 cell 和 Episode Markdown 已由 memorize 主流程处理；AtomicFact、Profile、AgentCase、Skill clustering 等 OME 派生结果是否完成，不能仅凭 HTTP 返回值推断。
+
+#### 6. OME Reflection 与 `deprecated_by` 的源码核验
+
+- `src/everos/memory/strategies/reflect_episodes.py` 将 Reflection 注册为 Cron `0 2 * * 1` 且 `enabled=False`，先检查 embedding，再为每个 distinct owner scope 构造 `ReflectionOrchestrator`。未配置 embedding 时不会进入 orchestrator。
+- `src/everos/memory/reflection/orchestrator.py` 按 cluster 选择候选：未反射 cluster 至少 2 个成员，已反射 cluster 仍有新增成员时也可再次处理，每轮最多 10 个。没有 `parent_type="cluster"` 的成员走 INIT；存在历史合并 Episode 时走 UPDATE，把旧 merged episode 与新 Episode 分开传给 `EpisodeReflector.areflect()`。
+- 合并结果先追加为一个新的 Episode Markdown entry，inline 中写 `parent_type="cluster"`、`parent_id=<cluster_id>`；随后发 `EpisodeExtracted(source="reflection")` 并等待该 event 的 OME downstream runs，超时为 120 秒。等待的是策略 run terminal，不是 Cascade 索引完成。
+- deprecation 在 cluster partition lock 内重新读取当前成员并与原始快照求交集，然后执行三类更新：
+  1. 按原 Episode 的 `md_path` 分组，对每个 Markdown 文件调用 `EpisodeWriter.patch_frontmatter()`，增量写入 `deprecated_entries: {旧 entry_id: 合并 entry_id}`；
+  2. 对旧 Episode 的 LanceDB 行更新 `deprecated_by=<merged_entry_id>`；
+  3. 对 `parent_id` 属于旧 Episode 的 AtomicFact 行，在 `deprecated_by IS NULL` 时更新同一 replacement ID。
+- 最后从 SQLite cluster 移除旧成员、加入合并 Episode、重新 embedding centroid、将 count 设为 1，并写入 ReflectionReport。也就是说，**Markdown 中记录的是 `deprecated_entries` 映射，LanceDB 行上才是 `deprecated_by` 字段**；两者共同实现“旧记录可追溯但默认不再作为 live 结果”的语义。
+
+#### 未确认能力（本次源码范围内没有证据）
+
+- **未确认**：官方仓库是否提供 Claude Code、Codex、Cursor 等本地会话格式的原生发现、预览、授权上传、脱敏和原文归档适配器；源码的 `/add` 只接受调用方已经归一化的消息 DTO。
+- **未确认**：除调用方普通 `/add` 和显式 `/flush` 之外，是否存在另一个未在本次 `main` 源码路径中发现的 idle/threshold 自动 flush 入口；当前可见 service 代码没有把 OME Cron/Idle 调度接到 buffer flush。
+- **未确认**：官方是否提供 Skill 候选人工评审、Git PR、回归验证和生产发布门禁；源码能写/覆盖 `SKILL.md`，但没有组织治理流程。
+- **未确认**：Foresight 是否有仓库外的消费方；当前源码注释明确指出没有搜索路由或 prompt slot 消费它，且策略默认关闭。
+- **已确认的限制而非未知**：Skill retire/delete 不是现成的生命周期能力；`extract_agent_skill.py` 明确不执行算法的 retire 分支，只有 rename reconciliation 会删除旧目录。团队不应把低 confidence Skill 自动删除当作官方保证。
+
 ## 4. 与需求画像逐项对照
 
 ### 需求矩阵

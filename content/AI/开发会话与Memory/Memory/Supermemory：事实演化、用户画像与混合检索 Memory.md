@@ -10,7 +10,7 @@ brief_version: "1.0"
 
 # Supermemory：事实演化、用户画像与混合检索 Memory
 
-> **项目快照**：官方仓库 <https://github.com/supermemoryai/supermemory>｜核验日期 2026-09-04｜Stars 29,207｜许可证 MIT｜main 分支最近提交 2026-09-02；GitHub Releases 的本地服务器最新可见预发布版本为 `server-v0.0.7-rc.2`（2026-07-22）。[^supermemory-repository][^supermemory-license][^supermemory-release]
+> **项目快照**：官方仓库 <https://github.com/supermemoryai/supermemory>｜核验日期 2026-09-06｜Stars 29,238｜许可证 MIT｜main 分支最近提交 2026-09-02；GitHub Releases 的本地服务器最新正式版本为 `server-v0.0.8`（2026-08-17）。[^supermemory-repository][^supermemory-license][^supermemory-release]
 
 > **需求画像**：目标是在开发 Agent 之间共享项目业务知识、技术决策和经验证的经验，并从被选择的开发会话中提取可追溯的 Skill 更新候选。硬约束是可在一台内网服务器或本地进程运行、模型 API 可切换、能接入 Claude Code/Codex/Cursor 等不同 Agent；接受先由外部采集器完成会话筛选，Skill 只生成候选并经过人工评审后发布。
 
@@ -28,7 +28,7 @@ Supermemory 面向需要跨会话记住事实、偏好、项目上下文和文�
 
 仅靠搜索无法稳定提供用户背景。`profile` 接口把静态事实和近期动态聚合成可直接注入系统提示词的用户上下文，减少每个 Agent 自己拼接历史的工作。[^supermemory-readme]
 
-业务文档和个体记忆通常需要一起检索。官方默认的 hybrid search 将 RAG 文档结果和个性化 Memory 放到同一次查询中，适合把团队规则与当前开发者偏好同时交给 Agent。[^supermemory-search]
+业务文档和个体记忆可以一起检索。官方提供 `hybrid` search，将 RAG 文档结果和个性化 Memory 放到同一次查询中；当前搜索文档把它列为推荐模式，同时把 `memories` 作为默认的 Memory-only 模式。[^supermemory-search]
 
 ### 问题边界
 
@@ -50,7 +50,7 @@ Supermemory 将记忆视为会演化的事实图，而不是只读的向量数�
 
 - **统一 Memory 结构与 ontology**：对话、上传文件、连接器内容和抽取出的 Memory 共享一套容器/空间范围，避免个人上下文和知识库被拆成互不相通的系统。[^supermemory-readme]
 - **静态画像与动态画像分离**：`profile.static` 适合稳定偏好、职责和长期事实，`profile.dynamic` 适合近期工作状态；调用方可以一次获取两者再拼进 Agent 提示词。[^supermemory-readme]
-- **Memory 与 RAG 合并检索**：默认 hybrid 模式同时检索个性化 Memory 和文档知识；也能选择 `memories` 模式只取长期事实。[^supermemory-search]
+- **Memory 与 RAG 合并检索**：`hybrid` 模式同时检索个性化 Memory 和文档知识；也能选择 `memories` 模式只取长期事实。官方文档推荐 hybrid，但不能把推荐模式误写成所有接口的默认值。[^supermemory-search]
 - **本地模型与外部模型可替换**：自托管版本默认使用本地 Xenova 向量模型，并支持 Anthropic、OpenAI、Gemini、Groq 及任意 OpenAI 兼容端点；因此可将公司 API 或 DeepSeek 作为配置项。[^supermemory-selfhost-config]
 
 ### 向量化与模型接口核验
@@ -120,14 +120,39 @@ flowchart LR
 
 Supermemory 直接覆盖“把业务知识和经验记住，并按项目和用户召回”的主路径，也符合可切换模型和单机 POC 方向。会话采集授权、跨 Agent 原始事件格式、证据链和 Skill 变更治理仍须外置，因此它不能单独构成完整的 Skill 更新系统。
 
-## 5. 开源与能力边界
+## 5. 源码实现核验：公开接入层，核心引擎以二进制交付
+
+> 本节严格区分三类证据：GitHub 中可阅读、可定位的实现代码；官方文档对 API 或 local 行为的描述；以及只发布可执行文件的 local server。文档中的“抽取器”“Memory Router”“Dreaming”或“图记忆”不能直接当作源码实现。
+
+### 5.1 按能力核对真实实现位置
+
+| 能力 | 可定位的公开源码/文档位置 | 实际能核验什么 | 仍不能从公开源码确认什么 |
+| --- | --- | --- | --- |
+| ingestion / add | [`apps/mcp/src/server/client/index.ts`](https://github.com/supermemoryai/supermemory/blob/main/apps/mcp/src/server/client/index.ts)、[`apps/mcp/src/server/tools/add-memory.ts`](https://github.com/supermemoryai/supermemory/blob/main/apps/mcp/src/server/tools/add-memory.ts) | MCP 层创建 `Supermemory` SDK 客户端并调用 `sdk.add(...)`；工具负责输入校验、作用域解析和结果映射。 | `/v3/documents`、`/v4/conversations` 背后的队列、解析/OCR、切分、重试和完成状态机；这些只在 [`apps/docs/ingestion/add-memories.mdx`](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/ingestion/add-memories.mdx) 等文档中描述。 |
+| 事实抽取与演化 | [`apps/mcp/src/server/tools/save-memory.ts`](https://github.com/supermemoryai/supermemory/blob/main/apps/mcp/src/server/tools/save-memory.ts) 只调用 `client.createMemory(...)`；事实更新、extends/derives、forgetting 等见 [`apps/docs/concepts/graph-memory.mdx`](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/concepts/graph-memory.mdx) 和 [`apps/docs/recall/memory-operations.mdx`](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/recall/memory-operations.mdx) | 公开代码能证明“保存/忘记”是 API/SDK 委托边界，文档能证明公开 API 的版本化更新、软删除和概念语义。 | 抽取 prompt、事实合并/冲突判定、图边构建、Dreaming 调度、过期判定及模型调用链；仓库中没有相应的公开服务端实现。 |
+| profile | [`apps/mcp/src/server/client/index.ts`](https://github.com/supermemoryai/supermemory/blob/main/apps/mcp/src/server/client/index.ts) 调用 `client.profile(...)`；[`packages/tools/src/shared/memory-client.ts`](https://github.com/supermemoryai/supermemory/blob/main/packages/tools/src/shared/memory-client.ts) 直接发 `POST /v4/profile`；API 说明见 [`apps/docs/api-reference/profiles.mdx`](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/api-reference/profiles.mdx) | 能核验调用参数包含 `containerTag`，并可请求 static/dynamic profile 及查询结果。 | static/dynamic profile 如何生成、缓存、排序以及如何与 Memory 图关联。 |
+| `containerTag` / space | [`apps/mcp/src/server/container-tag.ts`](https://github.com/supermemoryai/supermemory/blob/main/apps/mcp/src/server/container-tag.ts)、[`apps/mcp/src/server/space.ts`](https://github.com/supermemoryai/supermemory/blob/main/apps/mcp/src/server/space.ts)、[`apps/mcp/src/server/space-state.ts`](https://github.com/supermemoryai/supermemory/blob/main/apps/mcp/src/server/space-state.ts)、`add-memory.ts` / `search-memory.ts` | 能核验 MCP 如何选择 active space、解析显式 tag，并把最终 `containerTag` 传给 SDK；这是接入层的空间选择，不是数据库隔离实现。 | 后端如何自动创建 space、建立 namespace、执行授权和跨 tag 过滤；[`apps/docs/concepts/container-tags.mdx`](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/concepts/container-tags.mdx) 是行为文档，不是该实现。 |
+| embedding / search | [`apps/mcp/src/server/client/index.ts`](https://github.com/supermemoryai/supermemory/blob/main/apps/mcp/src/server/client/index.ts) 调用 `client.search.memories(...)`；[`packages/validation/api.ts`](https://github.com/supermemoryai/supermemory/blob/main/packages/validation/api.ts) 只定义请求/响应 schema；Embedding 与搜索模式见 [`apps/docs/self-hosting/embeddings.mdx`](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/self-hosting/embeddings.mdx) 和 [`apps/docs/recall/search.mdx`](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/recall/search.mdx) | 能核验客户端传递 query、limit、threshold、`searchMode` 等 API 参数，以及 schema 的字段形状。 | embedding worker、模型加载、向量持久化、hybrid 融合/排序、rerank、词法回退和索引实现；公开仓库没有这些服务端核心代码。 |
+
+### 5.2 local server 的可审查边界
+
+- `apps/mcp/package.json` 把 `supermemory` 作为外部依赖（当前为 `^4.0.0`），因此 MCP 仓库中的调用代码不是 Memory 引擎本身。[^supermemory-mcp-package]
+- `server-v0.0.8` Release 发布的是各平台 `supermemory-server` 可执行文件、校验文件、`install.sh` 和 `manifest.json`；发布页没有对应的服务端源码资产。[^supermemory-release-assets]
+- `server-v0.0.8` 的 Git 标签源码树仍是公开 monorepo 的客户端、MCP、文档和校验代码；在本次核验的公开树中没有可定位的 local server HTTP handler、抽取 worker、图引擎或 embedding/search 实现。因而“local 提供完整 Memory API、内置 graph engine、本地 Embedding”可以引用官方自托管文档，但不能写成已由公开源码审计过的实现事实。[^supermemory-selfhost-overview][^supermemory-local-tree]
+- 结论是：公开代码足以核验 API 接入边界和 MCP/SDK 适配逻辑；local 核心的 ingestion、事实演化、profile 生成、向量索引和 hybrid search 以二进制交付，源码实现、内部依赖和可重建性在本次公开资料范围内不可核验。发布页的 0.0.8 说明提到 pgvector 向量修复，但这只是版本说明，不能替代源码审计。[^supermemory-release-notes]
+
+### 5.3 对本文已有叙述的约束
+
+因此，本文第 3 节的“阶段说明”和第 2 节关于事实演化、抽取、向量化的描述应理解为**官方 API/自托管文档所声明的工作流**；只有本节列出的 MCP、SDK、schema 和空间选择代码属于可直接阅读的实现。任何关于抽取器内部算法、Memory Router、图更新或 hybrid ranking 的结论，都必须标注为文档事实或调研判断，而不能标注为源码事实。
+
+## 6. 开源与能力边界
 
 ### 边界清单
 
 | 能力 | 开源核心 | 商业版或 SaaS | 外部依赖 | 证据 |
 | --- | --- | --- | --- | --- |
 | Supermemory SDK、API 客户端及仓库代码 | 有，MIT | 无需购买才能阅读和修改仓库代码 | Node/Bun 或 Python 运行时、模型 API | [^supermemory-repository][^supermemory-license] |
-| Supermemory local 单机服务器 | 官方文档提供免费开源的单二进制 | 企业版提供组织权限、观测和规模化托管 | 下载的服务器二进制、LLM、可选 Embedding | [^supermemory-selfhost-overview][^supermemory-local-enterprise] |
+| Supermemory local 单机服务器 | 官方文档将其描述为免费开源单二进制；公开仓库可见的是接入层和文档，核心引擎源码未在本次公开树中定位 | 企业版提供组织权限、观测和规模化托管 | 下载的服务器二进制、LLM、可选 Embedding | [^supermemory-selfhost-overview][^supermemory-local-enterprise][^supermemory-local-tree] |
 | Memory 抽取、画像、混合检索 | local 有完整 Memory API | 托管平台使用专有长周期抽取模型，质量和成本优化不随 local 提供 | 自托管需自备 LLM；Embedding 可本地/远程 | [^supermemory-selfhost-config][^supermemory-local-enterprise] |
 | Connectors、托管 MCP、团队鉴权与控制台 | local 无 | 仅平台/Enterprise 提供 | OAuth、平台服务、组织账号 | [^supermemory-local-enterprise][^supermemory-selfhost-config] |
 | 图可视化组件 | `@supermemory/memory-graph` MIT 开源 | 平台 UI 可直接使用 | React、浏览器 | [^supermemory-graph] |
@@ -138,7 +163,7 @@ Supermemory 直接覆盖“把业务知识和经验记住，并按项目和用�
 
 调研判断：当前 GitHub 主仓库公开结构主要是 `apps`、`packages` 和文档，local server 以 Release 二进制方式交付；仓库未提供与 LightRAG 类似的完整 Docker Compose 自建栈。采用前应核对目标 Release 的二进制来源、源码可重建性和企业内部许可证审查要求，不能因为 README 使用“open source”就假设平台所有能力和模型均可自托管。
 
-## 6. 用户如何接入和使用
+## 7. 用户如何接入和使用
 
 ### 接入前提
 
@@ -154,19 +179,19 @@ Supermemory 直接覆盖“把业务知识和经验记住，并按项目和用�
 
 ### 日常使用方式
 
-写入是异步 ingestion，搜索可立即服务；Agent 可按项目标签取画像和相关 Memory，管理员通过本机日志和数据目录维护单机实例。[^supermemory-selfhost-config]
+写入是异步 ingestion；文档进入 `done` 后才表示可搜索。Agent 可按项目标签取画像和相关 Memory，管理员通过本机日志和数据目录维护单机实例。[^supermemory-selfhost-config]
 
 ### 接入限制
 
 本地版是单机、单 API Key 的服务，官方没有提供组织级角色、细粒度团队权限、连接器同步或完整控制台。中文 Embedding、数据迁移、原始会话撤回和跨 Agent 事件适配需要在 POC 中自行验证。
 
-## 7. 部署构成
+## 8. 部署构成
 
 ### 运行组件
 
 | 组件 | 必需或可选 | 职责 | 持久化数据 | 与其他组件的关系 | 证据 |
 | --- | --- | --- | --- | --- | --- |
-| `supermemory-server` 单二进制 | 必需（local） | HTTP Memory API、抽取调度、画像和搜索 | `SUPERMEMORY_DATA_DIR` 下的图引擎数据、认证密钥和模型缓存 | 调用 LLM，使用本地 Embedding 或远程 Embedding | [^supermemory-selfhost-overview][^supermemory-selfhost-config] |
+| `supermemory-server` 单二进制 | 必需（local） | 官方文档宣称提供 HTTP Memory API、抽取调度、画像和搜索；核心实现不可从公开仓库审计 | `SUPERMEMORY_DATA_DIR` 下的图/索引数据、认证密钥和模型缓存（以文档和 Release 行为为准） | 调用 LLM，使用本地 Embedding 或远程 Embedding | [^supermemory-selfhost-overview][^supermemory-selfhost-config][^supermemory-local-tree] |
 | 内置 Supermemory graph engine | 必需（随 local） | 保存文档、Memory 关系和索引 | 与数据目录同处 | 被 server 进程嵌入 | [^supermemory-selfhost-overview] |
 | 本地 Embedding 模型 | 默认必需的检索组件 | 将文档、Memory 和查询编码为向量 | 模型缓存与向量数据 | 在 server 内运行 | [^supermemory-embeddings] |
 | LLM API | Memory 抽取必需 | 摘要、上下文切分、事实提取与更新 | 官方未规定 LLM 侧持久化 | server 通过 OpenAI-compatible/Anthropic 等接口调用 | [^supermemory-selfhost-config] |
@@ -184,7 +209,7 @@ Supermemory 直接覆盖“把业务知识和经验记住，并按项目和用�
 - 备份整个 `SUPERMEMORY_DATA_DIR`；变更 Embedding 模型或维度前必须新建数据目录或全量重摄取，不能直接混用旧向量。[^supermemory-embeddings]
 - 需要将本地服务器版本固定并核对 Release；不能以 hosted 平台的连接器、MCP 或专有模型能力作为单机部署假设。
 
-## 8. 适配结论与能力缺口
+## 9. 适配结论与能力缺口
 
 ### 适配结论
 
@@ -222,11 +247,15 @@ Supermemory 直接覆盖“把业务知识和经验记住，并按项目和用�
 [^supermemory-release]: [Supermemory GitHub Releases](https://github.com/supermemoryai/supermemory/releases)
 [^supermemory-readme]: [Supermemory 官方 README：Memory、Profile、Hybrid Search 与本地运行](https://github.com/supermemoryai/supermemory/blob/main/README.md)
 [^supermemory-api]: [Supermemory 官方 API 参考](https://github.com/supermemoryai/supermemory/blob/main/skills/supermemory/references/api-reference.md)
-[^supermemory-search]: [Supermemory 官方概念文档：搜索与 Memory/RAG](https://supermemory.ai/docs/concepts/memory-vs-rag)
-[^supermemory-concepts]: [Supermemory 官方概念文档：Memory 与事实更新](https://supermemory.ai/docs/concepts/memory-vs-rag)
+[^supermemory-search]: [Supermemory 官方搜索文档：Memory、Documents 与 Hybrid Search](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/recall/search.mdx)
+[^supermemory-concepts]: [Supermemory 官方概念文档：Graph Memory 与事实更新](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/concepts/graph-memory.mdx)
 [^supermemory-selfhost-overview]: [Supermemory local 官方自托管概览](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/self-hosting/overview.mdx)
 [^supermemory-selfhost-quickstart]: [Supermemory local 官方快速开始](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/self-hosting/quickstart.mdx)
 [^supermemory-selfhost-config]: [Supermemory local 官方配置说明](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/self-hosting/configuration.mdx)
 [^supermemory-embeddings]: [Supermemory local 官方 Embedding 说明](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/self-hosting/embeddings.mdx)
 [^supermemory-local-enterprise]: [Supermemory 官方 Local 与 Enterprise 边界](https://github.com/supermemoryai/supermemory/blob/main/apps/docs/self-hosting/local-vs-enterprise.mdx)
 [^supermemory-graph]: [Supermemory Memory Graph 组件 README](https://github.com/supermemoryai/supermemory/tree/main/packages/memory-graph)
+[^supermemory-mcp-package]: [Supermemory MCP 的 package.json：外部 `supermemory` SDK 依赖](https://github.com/supermemoryai/supermemory/blob/main/apps/mcp/package.json)
+[^supermemory-release-assets]: [server-v0.0.8 Release assets：平台二进制与安装文件](https://github.com/supermemoryai/supermemory/releases/tag/server-v0.0.8)
+[^supermemory-release-notes]: [server-v0.0.8 Release notes：向量修复与自动 backfill](https://github.com/supermemoryai/supermemory/releases/tag/server-v0.0.8)
+[^supermemory-local-tree]: [server-v0.0.8 标签源码树](https://github.com/supermemoryai/supermemory/tree/server-v0.0.8)
