@@ -216,7 +216,53 @@ basic-memory config unset cli_output_style
 
 `config list` 用于查看当前配置，`config set` 用于写入配置，`config unset` 用于移除配置。不要把 API Key 或其他秘密直接提交到 Git 仓库中的配置文件。
 
-### 5.3 环境变量
+### 5.3 项目级本地 Memory 路由
+
+如果只希望每个代码项目使用自己的 Memory，不要把所有内容都放在默认的 `~/basic-memory` 下。可以为每个项目配置独立的本地路径，并将路径放在代码仓库内部的隐藏目录中，例如：
+
+```text
+E:/work/my-project/.basic-memory
+```
+
+在项目根目录执行：
+
+```bash
+basic-memory project add my-project ./.basic-memory
+basic-memory project set-local my-project
+basic-memory project list
+```
+
+也可以直接在全局配置文件 `~/.basic-memory/config.json` 中配置：
+
+```json
+{
+  "projects": {
+    "my-project": {
+      "path": "E:/work/my-project/.basic-memory",
+      "mode": "local"
+    }
+  },
+  "default_project": "my-project"
+}
+```
+
+Windows 下建议在 JSON 中使用正斜杠，或者对反斜杠进行转义。这里的 `~/.basic-memory/config.json` 只是全局路由配置，不代表 Memory 内容必须存放在 `~/.basic-memory`；真正的 Markdown 项目内容由 `projects.<name>.path` 决定。
+
+如果只配置一个项目，可以设置 `default_project`，让 MCP 请求默认使用它。如果配置多个项目，需要显式选择对应的项目，或者为不同项目设置独立的 MCP 入口；不要假设 Basic Memory 总能根据当前 Git 工作目录自动推断项目。
+
+为了避免意外走云端，可以强制本地路由：
+
+```bash
+# Bash
+export BASIC_MEMORY_FORCE_LOCAL=true
+
+# PowerShell
+$env:BASIC_MEMORY_FORCE_LOCAL = "true"
+```
+
+项目级 Memory 是否提交到 Git 取决于用途：团队共享的项目知识可以提交 `.basic-memory/`；个人偏好或敏感内容则应加入 `.gitignore`。
+
+### 5.4 环境变量
 
 官方材料中出现的常用环境变量包括：
 
