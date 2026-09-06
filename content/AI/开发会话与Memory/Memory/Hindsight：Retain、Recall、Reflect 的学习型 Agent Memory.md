@@ -44,7 +44,7 @@ Hindsight 的核心主张是“让 Agent 学习，而不只是记住”：输入
 
 ### Memory 实现方式
 
-`Retain` 将对话、文档或 Agent 事件抽取为事实、实体、关系、时间和经历，并按 Memory Bank 隔离；这些结构化记忆进入向量与全文检索路径。`Recall` 返回相关事实/经历，`Reflect` 以检索结果为依据生成综合回答，后台再把观察和心理模型整理为后续可检索记忆。[^hindsight-retain][^hindsight-operations]
+`Retain` 将对话、文档或 Agent 事件抽取为事实、实体、关系、时间和经历，并按 Memory Bank 隔离；这些结构化记忆进入向量与全文检索路径。`Recall` 返回相关事实/经历，`Reflect` 以检索结果为依据生成综合回答；源码中后台 consolidation 负责写入观察，mental model refresh 则是后续独立的异步写入流程。[^hindsight-retain][^hindsight-operations][^hindsight-src-engine][^hindsight-src-consolidator]
 
 ### 关键设计选择
 
@@ -87,7 +87,7 @@ flowchart LR
 | ---------- | ----------------------- | --------------------------------------- | ----------------------------- | --------------------------------------------------- |
 | 输入与 Retain | 事实、对话、文档或 Agent 事件      | 通过 API/SDK 接受内容，LLM 提取关键事实、时间、实体和关系     | 待规范化的记忆事实与经历                  | [^hindsight-retain]                                 |
 | 规范化与建模     | 抽取结果及已有实体               | 归一化实体，建立关系和时间序列，并写入稀疏/稠密表示与元数据          | 世界事实、经历、实体关系和搜索索引             | [^hindsight-readme][^hindsight-retain]              |
-| 后台学习       | 同一 bank 中的相关事实          | 合并相关事实为证据支持的观察，刷新心理模型或知识页               | 带证据的观察、心理模型或可投影 Markdown 的知识页 | [^hindsight-observations][^hindsight-mental-models] |
+| 后台学习       | 同一 bank 中尚未 consolidation 的 world/experience 记忆 | Consolidation 通过 LLM create/update/delete 观察并标记来源；backlog 排空后再按触发器提交 mental model refresh | `fact_type='observation'` 的观察、刷新后的心理模型或可投影 Markdown 的知识页 | [^hindsight-observations][^hindsight-mental-models][^hindsight-src-consolidator][^hindsight-src-reads] |
 | Recall     | 查询、bank、过滤器和预算          | 并行执行语义、关键词、图和时间检索，再融合和重排                | 相关记忆列表及其元数据                   | [^hindsight-recall]                                 |
 | Reflect    | 查询与召回上下文                | 对既有记忆作更深分析，形成 disposition-aware 的答案或新连接 | 解释、建议或项目风险/经验总结               | [^hindsight-reflect]                                |
 | 外部消费       | 记忆结果、原始会话 ID 和 Skill 版本 | 由外部治理层关联证据，生成候选 Skill 差异并走 Git 评审       | 可审计的候选 PR 和验证结果               | 调研判断                                                |
@@ -96,13 +96,29 @@ flowchart LR
 
 - **Bank**：隔离的记忆存储单元，可以按项目、用户或 Agent 建立；跨 bank 不应泄漏记忆。[^hindsight-banks]
 - **世界事实与经历**：Retain 根据内容将信息送入事实或经历路径，并以实体、关系、时间和向量表示保存。经历适合表示“Agent 曾经如何处理问题”，事实适合表示项目规则和外部知识。[^hindsight-memory-types]
-- **观察**：后台把相关事实整合为去重的信念；每条观察保留支持证据、精确引文和 proof count，后续新证据会强化、削弱或扩展它，而不是静默覆盖。[^hindsight-observations]
-- **心理模型与知识页**：心理模型是针对 bank 的持续问题答案；知识页是可组织、可搜索、可投影为普通 Markdown 的长期文档。[^hindsight-mental-models]
+- **观察**：后台把相关事实整合为去重的信念。当前 SQL consolidation 路径把观察写成 `fact_type='observation'` 的 `memory_units`，以 `source_memory_ids`、`proof_count`、tags 和时间字段表达来源与强度；更新可追加 `observation_history`。官方响应模型另有 `ObservationEvidence.quote`，但这不等于 quote 必然作为列落在观察表中。[^hindsight-observations][^hindsight-src-consolidator][^hindsight-src-reads]
+- **心理模型与知识页**：心理模型是针对 bank 的持续问题答案；知识页是可组织、可搜索、可投影为普通 Markdown 的长期文档。源码显示 mental model refresh 是 consolidation 排空后的独立异步写入流程，并可写入 `mental_model_history`；普通 Reflect 问答本身只读。[^hindsight-mental-models][^hindsight-src-consolidator][^hindsight-src-engine]
 - **检索索引**：PostgreSQL 中的 pgvector、tsvector、关系查询和 JSONB 元数据共同支撑混合检索；官方没有把独立向量数据库列为必需组件。[^hindsight-storage]
 
 ### 最终输出
 
-调用方可以获得受 bank、元数据、时间和查询约束的结构化记忆列表，也可以获得 Reflect 基于这些记忆生成的综合回答。对 Skill 更新场景，建议 Recall 输出连同记忆 ID、证据引文和关联会话 ID进入候选生成器；Reflect 可负责总结失败模式，但不能绕过人工评审直接修改 Skill。
+调用方可以获得受 bank、元数据、时间和查询约束的结构化记忆列表，也可以获得 Reflect 基于这些记忆生成的综合回答。对 Skill 更新场景，建议 Recall 输出连同记忆 ID、来源记忆 ID、原始会话 ID 和外部证据片段进入候选生成器；Reflect 可负责总结失败模式，但不能绕过人工评审直接修改 Skill。
+
+### 源码实现核验（2026-09-06）
+
+本节只阅读公开仓库 `hindsight-api-slim` 的源码，没有安装、启动或运行 Hindsight。源码链接以 `main` 分支及行号为参考；若要做可复现审计，应将链接固定到具体 commit。下表明确区分 **文档/注释声明**、**当前源码事实** 和 **尚未由源码确认的部分**。
+
+| 主题 | 文档/注释声明 | 当前源码事实 | 未知或边界 |
+| --- | --- | --- | --- |
+| Retain | Retain 把内容转成事实并建立可检索结构。 | `MemoryEngine.retain_batch_async` 进入 `_retain_batch_async_internal`；`engine/retain/orchestrator.py` 的 `retain_batch` 负责分块，调用 `_extract_and_embed` 做 LLM 抽取和 Embedding，再经过实体/链接处理并持久化。Retain 完成后调用 `_submit_post_insert_maintenance`；当 `enable_observations` 与 `enable_auto_consolidation` 同时开启时，明确提交异步 consolidation 操作。[^hindsight-src-engine][^hindsight-src-retain] | 分块、实体解析和存储细节会随 backend/config 改变；本文没有运行验证 provider 的实际请求。 |
+| Consolidation | Consolidation 将新记忆合并为观察或更高层知识。 | `consolidator.py:run_consolidation_job` 从 `find_unconsolidated` 读取 `fact_type` 为 `world`/`experience` 且 `consolidated_at`、`consolidation_failed_at` 均为空的记忆，按批次召回相关观察，调用一次 consolidation LLM，校验 action 后在一个事务中执行 observation 的 create/update/delete，并把成功消费的源记忆标记为 `consolidated_at`。触及轮次上限时重新提交 consolidation；队列排空后才为符合触发条件且已过期的 mental model 提交 refresh。 | `run_consolidation_job` 的 docstring 使用了“consolidate ... into mental models”，但具体写入路径首先是 `memory_units` 中 `fact_type='observation'` 的行；mental model refresh 是后续、独立的异步任务，不应把两者当作同一个写入动作。 |
+| Recall | Recall 使用语义、关键词、图和时间检索，再融合与重排。 | `MemoryEngine.recall_async` 的源码注释明确列出 semantic vector、BM25、graph activation、temporal graph、RRF、rerank、MMR 和 token filter。PostgreSQL 的 `recall_unified` 实际编排 dense+BM25、可选 temporal，以及按 fact type 并行的 graph；`fusion.py` 的 RRF 公式是 `sum(1 / (k + rank))`，默认 `k=60`，随后可用 cross-encoder 重排。[^hindsight-src-engine][^hindsight-src-postgres][^hindsight-src-fusion] | “4-way”是当前主路径的编排描述；具体 backend 可以由 store 自己回答 recall，重排器也可以配置为 passthrough/heuristic，不能只依据产品文档推断每次都加载 Cross-Encoder。 |
+| Reflect | Reflect 基于召回记忆生成带 disposition 的综合回答。 | `reflect_async` 明确写为 **read-only**，调用 `run_reflect_agent`；agent 通过工具按 mental models → observations → raw recall（必要时 expand）的层级取证，结束时只返回文本/文档、使用过的记忆 ID 和 trace。源码没有在 Reflect agent 中写入记忆；mental model 的持久化更新发生在 refresh executor，而非普通 Reflect 问答。[^hindsight-src-engine][^hindsight-src-reflect] | Reflect 的回答质量、工具调用次数和 provider 是否支持工具调用，不能仅凭静态源码保证。 |
+| Memory Bank | Bank 是用户、Agent 或项目的隔离记忆空间，可带背景和 disposition。 | SQLAlchemy 的 `Bank` 记录 `bank_id`、`disposition`、`background`；Recall、consolidation、mental model 查询和写入均显式携带 `bank_id`。PostgreSQL reads 的共享投影也把 `source_memory_ids`、`consolidated_at`、`observation_scopes` 一并按 bank 读取。[^hindsight-src-models][^hindsight-src-reads] | `bank_id` 隔离不是完整组织权限模型；租户认证、API 授权、原始会话访问控制仍在外围/扩展层。 |
+| Observation | Observation 是带证据的信念/模式，并可计算趋势。 | `engine/reflect/observations.py` 的 `ObservationEvidence` 模型确实要求 `memory_id`、`quote`、`timestamp`，`Observation` 还计算 evidence span/count 和 trend。但 consolidation 的实际 SQL 写入使用 `memory_units.fact_type='observation'`、`source_memory_ids`、`proof_count`、tags 和时间字段；更新时可把旧状态追加到独立 `observation_history` 表。 | 当前 `memory_units` 写入路径没有 quote 列；因此“精确引文”是响应/模型层的证据表达，不能直接等同于数据库中必然保存了原文引文。若需要可审计引文，应由调用方通过来源记忆或外部会话归档补齐。 |
+| Mental Model | Mental Model/知识页是可刷新、可直接消费的长期理解。 | 源码通过 `mental_models` 表保存内容、刷新时间和 scope；`reflect_async` 在问答时读取它，refresh 路径更新内容，并在启用时向 `mental_model_history` 写入每次刷新前的快照及失败记录。Consolidation 只在排空当前 backlog 后，按 `refresh_after_consolidation`、scope 和 staleness 提交 refresh。 | `models.py` 的 SQLAlchemy 声明只覆盖部分核心表，并没有一个可据此推断全部字段的 `MentalModel` ORM 类；历史、知识页索引和 store-owned backend 的完整行为应以各自源码为准。 |
+
+由此可把实现边界压缩为：**Retain 写入原始结构化记忆并排队；Consolidation 读取未整合的 world/experience，写 observation 并标记来源；Recall 做多臂检索、融合和重排；Reflect 只读取这些层级并回答；Mental Model refresh 是单独的写入流程。** 这比把“Reflect 负责学习”或把“Observation 的 quote 一定已经落库”作为实现事实更准确。
 
 ## 4. 与需求画像逐项对照
 
@@ -117,7 +133,7 @@ flowchart LR
 | 模型 API 可切换 | 必须 | 支持 DeepSeek、OpenAI-compatible endpoint、本地 Ollama/LM Studio、LiteLLM 等 | [^hindsight-configuration][^hindsight-models] | 满足 | 公司 API 可按 OpenAI-compatible 配置；Embedding 需单独选择支持的 provider |
 | 单机自部署 | 必须 | 单容器嵌入 pg0，或 Docker + PostgreSQL/pgvector | [^hindsight-installation][^hindsight-storage] | 满足 | 高吞吐 worker、Helm/Kubernetes 是可选扩展，不是 POC 最小路径 |
 | 用户主动控制原始会话上传 | 期望 | SDK/REST 可显式调用 Retain；自动编码 Agent 集成可不启用 | [^hindsight-integrations][^hindsight-operations] | 部分满足 | 选择、审批、脱敏和上传前预览需由本地客户端/网关实现 |
-| Skill 候选可追溯、人工发布 | 必须 | 观察保留证据引文；webhook 可通知 retain/consolidation 生命周期 | [^hindsight-observations][^hindsight-production] | 部分满足 | Skill diff、评审人、Git PR 与回归验证不属于 Hindsight 核心 |
+| Skill 候选可追溯、人工发布 | 必须 | 观察保留 `source_memory_ids`/`proof_count` 等来源 bookkeeping；响应模型可表达精确引文，webhook 可通知 retain/consolidation 生命周期 | [^hindsight-observations][^hindsight-src-consolidator][^hindsight-src-reads][^hindsight-production] | 部分满足 | 可审计原文引文、Skill diff、评审人、Git PR 与回归验证仍不属于 Hindsight 核心 |
 | 隐私和跨项目隔离 | 必须 | Bank 隔离；可选 Memory Defense 检测并阻断或脱敏 45 类秘密/PII 模式 | [^hindsight-banks][^hindsight-defense] | 部分满足 | 需另建访问权限、原始会话保留与人工授权策略；检测不能替代数据治理 |
 
 ### 对照归纳
@@ -260,3 +276,12 @@ Hindsight 官方集成覆盖多个 Agent，但项目仍需核验目标 Agent 的
 [^hindsight-defense]: [Hindsight 官方文档：Memory Defense](https://hindsight.vectorize.io/developer/memory-defense)
 [^hindsight-production]: [Hindsight README：Running in Production](https://github.com/vectorize-io/hindsight#running-in-production)
 [^hindsight-cloud]: [Hindsight 官方文档：Self-hosted、Cloud 与 Enterprise](https://vectorize.io/hindsight)
+[^hindsight-src-engine]: [Hindsight 源码：MemoryEngine 的 Retain/Recall/Reflect 与后台任务提交（Retain L5147、Recall L6957、Reflect L13599）](https://github.com/vectorize-io/hindsight/blob/eb32332e26fc9d3d827632a8e48ae405a78f9801/hindsight-api-slim/hindsight_api/engine/memory_engine.py#L5147-L5169)
+[^hindsight-src-retain]: [Hindsight 源码：Retain orchestrator（入口 L1194、抽取 L2522）](https://github.com/vectorize-io/hindsight/blob/eb32332e26fc9d3d827632a8e48ae405a78f9801/hindsight-api-slim/hindsight_api/engine/retain/orchestrator.py#L1194-L1247)
+[^hindsight-src-consolidator]: [Hindsight 源码：Consolidation（入口 L1311、批处理 L2119、观察写入 L2636/L3250、refresh 触发 L1962）](https://github.com/vectorize-io/hindsight/blob/eb32332e26fc9d3d827632a8e48ae405a78f9801/hindsight-api-slim/hindsight_api/engine/consolidation/consolidator.py#L1311-L1368)
+[^hindsight-src-reads]: [Hindsight 源码：PostgreSQL memory reads、consolidated markers 与 source IDs](https://github.com/vectorize-io/hindsight/blob/eb32332e26fc9d3d827632a8e48ae405a78f9801/hindsight-api-slim/hindsight_api/engine/memories/pg/reads.py#L357-L398)
+[^hindsight-src-postgres]: [Hindsight 源码：PostgresMemories.recall_unified](https://github.com/vectorize-io/hindsight/blob/eb32332e26fc9d3d827632a8e48ae405a78f9801/hindsight-api-slim/hindsight_api/engine/memories/postgres.py#L82-L209)
+[^hindsight-src-fusion]: [Hindsight 源码：Recall rank fusion](https://github.com/vectorize-io/hindsight/blob/eb32332e26fc9d3d827632a8e48ae405a78f9801/hindsight-api-slim/hindsight_api/engine/search/fusion.py#L29-L109)
+[^hindsight-src-reflect]: [Hindsight 源码：Reflect agent tool loop](https://github.com/vectorize-io/hindsight/blob/eb32332e26fc9d3d827632a8e48ae405a78f9801/hindsight-api-slim/hindsight_api/engine/reflect/agent.py#L426-L514)
+[^hindsight-src-observations]: [Hindsight 源码：Observation/Evidence response models 与 trend 计算](https://github.com/vectorize-io/hindsight/blob/eb32332e26fc9d3d827632a8e48ae405a78f9801/hindsight-api-slim/hindsight_api/engine/reflect/observations.py#L33-L112)
+[^hindsight-src-models]: [Hindsight 源码：Bank 与 MemoryUnit ORM 声明](https://github.com/vectorize-io/hindsight/blob/eb32332e26fc9d3d827632a8e48ae405a78f9801/hindsight-api-slim/hindsight_api/models.py#L317-L330)

@@ -40,11 +40,11 @@ LightRAG 是 RAG/知识图谱基础设施，不是完整的 Agent Memory：它�
 
 ### 核心判断
 
-LightRAG 的核心是“双层知识”：一层是由实体和关系组成的知识图，另一层是文本块、实体和关系的向量索引。查询时按问题提取关键词，在图上定位局部/全局上下文，再与向量结果合并交给 LLM 生成答案。[^lightrag-readme][^lightrag-operate]
+LightRAG 的核心是“双层知识”：一层是由实体和关系组成的知识图，另一层是文本块、实体和关系的向量存储。查询时先由 LLM 提取高层/低层关键词，再在图节点/边对应的向量存储中定位局部或全局上下文；`mix` 额外召回文本块向量，最后合并交给 LLM 生成答案。源码没有独立的全文/BM25 索引；关系 `keywords` 字段和查询关键词抽取不能等同于持久化全文检索。[^lightrag-readme][^lightrag-operate][^lightrag-source-operate]
 
 ### Memory 实现方式
 
-文档或会话先切成文本块，LLM 从中抽取实体和关系并写入图存储，同时为文本块、实体和关系生成 Embedding；关键词索引补充精确匹配。查询阶段根据 local/global 模式在图、向量和关键词索引中取回结果，合并上下文后交给 LLM 生成回答，知识更新通过增量插入和索引维护完成。[^lightrag-readme][^lightrag-operate]
+文档或会话先切成文本块，LLM 从中抽取实体和关系并写入图存储，同时为文本块、实体和关系生成 Embedding；抽取出的关系 `keywords` 以及查询阶段的高/低层关键词用于提示和向量检索，不是独立的全文索引。查询阶段根据 `local`/`global`/`hybrid`/`mix` 组合图和向量结果，合并上下文后交给 LLM 生成回答，知识更新通过增量插入和存储 flush 完成。[^lightrag-readme][^lightrag-operate][^lightrag-source-operate]
 
 ### 关键设计选择
 
@@ -97,13 +97,70 @@ flowchart LR
 
 - **文本块与文档状态**：记录原文片段、文件路径、处理阶段和失败状态；可用于重试、删除和来源定位。[^lightrag-file-pipeline]
 - **实体与关系图**：实体包含名称、类型、描述和来源；关系包含端点、描述、关键词、权重和来源 ID。官方支持创建、编辑、删除和合并实体/关系。[^lightrag-core]
-- **向量索引**：文本块、实体和关系分别可产生 Embedding；查询模式可把它们与图邻域结合。变更 Embedding 模型或维度通常需要清理并重新索引。[^lightrag-readme][^lightrag-storage]
+- **向量索引**：文本块、实体和关系分别写入 `chunks`、`entities`、`relationships` 向量命名空间；查询模式可把它们与图邻域结合。源码没有独立的 `full_text`/BM25 命名空间；OpenSearch 本身支持全文查询，但官方 LightRAG OpenSearch 适配器的 `OpenSearchVectorDBStorage.query()` 当前只构造 k-NN 查询，不能当作 LightRAG core 的统一全文 API。变更 Embedding 模型或维度通常需要清理并重新索引。[^lightrag-readme][^lightrag-storage][^lightrag-source-namespace][^lightrag-source-lightrag][^lightrag-source-opensearch]
 - **Workspace 隔离**：`workspace` 通过目录、表字段、集合前缀、Neo4j label 或 OpenSearch index 前缀隔离知识库，适合按项目/团队拆分。[^lightrag-workspace]
 - **LLM 缓存与来源**：抽取结果缓存可辅助增量更新和删除重建；插入时提供 `file_paths` 能让答案关联原始文件。[^lightrag-core]
 
 ### 最终输出
 
 REST API/WebUI 或 SDK 返回答案、召回上下文、图关系和来源信息。对 Skill 更新，应让外部分析器消费 `only_need_context` 或带引用的查询结果，关联原始会话对象后再生成候选，而不是将模型回答直接写入 Skill。
+
+## 3.1 官方源码实现核验（HKUDS/LightRAG main）
+
+以下结论按官方仓库 `main` 的函数级源码核验，重点看 `lightrag/lightrag.py`、`lightrag/pipeline.py`、`lightrag/operate.py`、`lightrag/namespace.py` 和 `lightrag/utils_graph.py`，不是把 README 中的架构图直接当成写入实现。一个需要纠正的边界是：**LightRAG core 没有独立的全文/BM25 存储或查询 API**；`keywords` 是关系元数据或查询阶段由 LLM 生成的高/低层关键词，OpenSearch 本身支持全文查询，但官方 LightRAG OpenSearch 适配器的 `OpenSearchVectorDBStorage.query()` 当前只构造 k-NN 查询，不能等同于 LightRAG 自己维护的全文索引。[^lightrag-source-lightrag][^lightrag-source-pipeline][^lightrag-source-operate][^lightrag-source-namespace][^lightrag-source-opensearch]
+
+### 插入 pipeline：SDK 与 Server 不是同一入口
+
+1. `LightRAG.insert()` 只是同步包装；`LightRAG.ainsert()` 在生成 `track_id` 后调用 `apipeline_enqueue_documents()` 和 `apipeline_process_enqueue_documents()`。源码明确说明 `ainsert()` 固定使用 **F（fixed-token）切分**，不能直接选择 R（recursive）、V（semantic-vector）或 P（paragraph-semantic）；Server/REST 走 pipeline 两个方法并通过 `process_options` 选择 F/R/V/P/C。[^lightrag-source-lightrag][^lightrag-source-pipeline]
+2. `apipeline_enqueue_documents()` 负责规范化 `ids`、`file_paths`、`docs_format`、解析/切分选项，去重并生成文档状态；`full_docs` 先写入正文，`doc_status` 记录 `PENDING`、`track_id`、文件路径和配置快照。`file_paths` 数量必须和输入文档一致，空值归一为 `unknown_source`。因此“上传成功”只是进入异步队列，不代表图和向量已完成。[^lightrag-source-pipeline]
+3. `apipeline_process_enqueue_documents()` 的单文档顺序是：切分并构造 chunk → 并行写 `doc_status=PROCESSING`、`chunks_vdb` 和 `text_chunks` → 调用 `_process_extract_entities()`/`extract_entities()` → 调用 `merge_nodes_and_edges()` → `_insert_done()` flush 所有存储 → 最后才把文档状态写成 `PROCESSED`。flush 失败会使文档进入失败/可重试路径，而不是先标记成功。[^lightrag-source-pipeline][^lightrag-source-lightrag]
+4. 若 `process_options` 含 `!`，pipeline 会跳过实体/关系抽取，但仍保留文本块和 chunk 向量，因此可支持 `naive`/`mix` 的文档召回；这不是“只写全文索引”，而是只完成 chunk KV/向量路径。[^lightrag-source-pipeline]
+
+### chunk、实体和关系抽取
+
+- `operate.extract_entities()` 按 chunk 并发调用 `global_config["role_llm_funcs"]["extract"]`；可走 JSON structured output 或分隔符文本格式，初次抽取后可按 `entity_extract_max_gleaning` 再调用一次 gleaning。抽取缓存通过 `use_llm_func_with_cache()` 写入 `llm_response_cache`，cache key 列表回写对应 `text_chunks`，供后续删除重建复用。[^lightrag-source-operate]
+- 文本结果由 `_process_extraction_result()` 解析，JSON 结果由 `_process_json_extraction_result()` 解析；`_handle_single_entity_extraction()` 和 `_handle_single_relationship_extraction()` 会清理/校验名称、类型、描述、端点，拒绝空描述、自环和非法实体类型，并把 `source_id` 设为 chunk ID、把 `file_path` 和 `timestamp` 直接带入结果。关系初始 `weight` 默认是 `1.0`，不是模型自由输出的可信度分数。[^lightrag-source-operate]
+- `merge_nodes_and_edges()` 先聚合所有 chunk 的节点/边，再按实体和关系分别加 keyed lock 并发合并。实体合并会去重描述、摘要、合并类型和来源；关系合并会合并描述/关键词、按证据重算 weight，并为缺失端点补建节点。实体/关系摘要本身也可能再次调用 Extract LLM，因此索引成本不只有每个 chunk 的一次抽取。[^lightrag-source-operate]
+
+### KV、图、向量和“全文”写入的真实分工
+
+`LightRAG.__post_init__()`/初始化代码建立的官方命名空间如下；这些 namespace 是源码中可核验的实际对象，而不是抽象的“四类数据库”名称：[^lightrag-source-namespace][^lightrag-source-lightrag]
+
+| 逻辑数据 | 实际 namespace/对象 | 写入位置或函数 | 用途与限制 |
+| --- | --- | --- | --- |
+| 原文、chunk、LLM cache | `full_docs`、`text_chunks`、`llm_response_cache` | `apipeline_enqueue_documents()`、pipeline Stage 1、`extract_entities()` | 原文和 chunk 是 KV；cache 用于抽取/摘要/删除重建，不是用户可见的全文检索索引 |
+| 每文档候选锚点 | `full_entities`、`full_relations` | `merge_nodes_and_edges()` Phase 0 | 在首个图变更前 flush；保存某文档可能触达的实体/关系超集，供崩溃恢复和 purge 定位，不是实体事实本身 |
+| 完整来源追踪 | `entity_chunks`、`relation_chunks` | `_merge_nodes_then_upsert()`、`_merge_edges_then_upsert()` 和 rebuild | 保存实体/关系涉及的完整 chunk ID 列表；比图节点/边上受限的 `source_id` 更适合删除重建 |
+| 知识图 | `chunk_entity_relation` | `_merge_nodes_then_upsert()` 的 `upsert_node()`、`_merge_edges_then_upsert()` 的 `upsert_edge()` | 保存实体属性、关系属性、`source_id`、`file_path`、描述和权重；图存储后端可替换 |
+| 三类向量 | `entities`、`relationships`、`chunks` | entity/relation merge 后分别 `vdb.upsert()`；Stage 1 写 chunk VDB | 分别用于实体、关系和文本块语义召回；需要兼容的 embedding 函数和固定维度 |
+| 全文/BM25 | **没有 LightRAG core 独立 namespace** | 无独立写入函数或全文查询接口 | relation `keywords` 只是字段；OpenSearch 本身可提供全文能力，但官方适配器的 `query()` 只走 k-NN，不能据此宣称 LightRAG 已提供全文检索 |
+
+写入还有两个容易被忽略的顺序约束：Phase 0 的 `full_entities`/`full_relations` 恢复锚点必须先 flush，之后才允许图、向量和 tracking 变更；所有派生存储 flush 完成后才写 `PROCESSED`。因此图、向量和文档状态不是一次数据库事务，而是由写前锚点、pipeline 状态和 flush 顺序组成的可恢复协议。[^lightrag-source-operate][^lightrag-source-pipeline]
+
+### query local/global/hybrid/mix 的实际路径
+
+`LightRAG.aquery_data()` 对 `local`、`global`、`hybrid`、`mix` 调用 `operate.kg_query()`；`naive` 调用 `naive_query()`；`bypass` 直接返回空的 entities/relationships/chunks 数据。`kg_query()` 先执行 `extract_keywords_only()` 得到 high-level/low-level keywords，再由 `_perform_kg_search()` 选择分支：[^lightrag-source-lightrag][^lightrag-source-operate]
+
+| 模式 | 真实召回路径 | 不能误解为 |
+| --- | --- | --- |
+| `local` | 低层关键词 → `entities_vdb.query()` → 图节点、节点度数和邻接边 → entity 关联 chunks | 不是对全文做词法搜索，也不是直接向量召回所有文本块 |
+| `global` | 高层关键词 → `relationships_vdb.query()` → 图边属性和两端实体 → relation 关联 chunks | 不是全图遍历或独立的 global full-text index |
+| `hybrid` | 同时执行 local 与 global，实体和关系按 round-robin 去重合并 | 不是把两套结果按统一 BM25 分数融合 |
+| `mix` | hybrid 的图检索 + `chunks_vdb` 对原始 query 的文本块向量召回，再按 chunk ID 合并/去重，可选 rerank | 只有该模式才把独立 chunk 向量分支加入 KG context |
+| `naive` | `chunks_vdb` 向量召回，实体和关系数组为空 | 不是 LightRAG 的全文/BM25 基线 |
+| `bypass` | 跳过检索，直接让上层 LLM 处理 | 不产生检索上下文 |
+
+`_get_node_data()` 通过实体 VDB 结果批量读图节点和度数，再从邻接边选关系；`_get_edge_data()` 通过关系 VDB 结果批量读边，再读边的端点实体。`_build_query_context()` 随后做 token 截断、实体/关系关联 chunk 合并、可选 rerank 和引用格式化；`only_need_context=True` 可以停在 LLM 生成之前，`query_data()` 则返回结构化 entities、relationships、chunks 和 references。短查询在关键词抽取为空时可能回退原 query，长查询若高低层关键词都为空则返回无结果。[^lightrag-source-operate][^lightrag-source-lightrag]
+
+### 删除、重建与 source/file tracking
+
+- 文档删除入口是 `LightRAG.adelete_by_doc_id()`。它读取 `doc_status` 的 `chunks_list` 和 LLM cache IDs，进入 `_purge_kg_contributions()`；该函数用 `full_entities`/`full_relations` 恢复锚点定位候选，再交叉检查 `entity_chunks`/`relation_chunks` 和图上的 `source_id`，将对象分成“无剩余来源则删除”或“进入重建流程”。是否能完整重建取决于幸存抽取 cache 和 `rebuild_policy`，不是只要存在其他 chunk 就一定得到完整语义重建。[^lightrag-source-lightrag]
+- 重建由 `operate.rebuild_knowledge_from_chunks()` 完成：读取幸存 chunk 的抽取 cache，重新汇总实体/关系描述、类型、关键词、权重和 file paths，再 `upsert_node`/`upsert_edge`、更新 tracking rows 和实体/关系向量。源码中的 structural fallback 只在 `rebuild_policy="rollback"` 时启用；默认 `best_effort` 遇到不可用 cache 时可能记录 degraded/failed，或保留部分既有图语义而不完成同等 provenance 修复，因此不能把两种 policy 视为相同。[^lightrag-source-operate]
+- 删除顺序是“先修复/删除图、向量和 tracking → flush → 删除 chunk KV/VDB → 删除每文档的 `full_entities`/`full_relations` 锚点 → 可选删除 LLM cache → 最后删除 `doc_status` 和 `full_docs`”。缺 recovery proof 时会 fail closed 返回冲突，而不是静默跳过图清理；`delete_llm_cache=False` 默认不会删除抽取缓存。[^lightrag-source-lightrag]
+- `LightRAG.adelete_by_entity()`/`adelete_by_relation()` 委托 `utils_graph` 删除图和实体/关系向量；当前 `LightRAG` wrapper 没有把 `self.entity_chunks`/`self.relation_chunks` 传入这两个函数，尽管底层函数有可选 tracking 参数。因此直接实体/关系删除路径不能按文档删除路径同等保证 tracking row 清理，这是使用源码时必须单独审计的限制。[^lightrag-source-lightrag][^lightrag-source-utils-graph]
+- `file_paths` 在 enqueue 时归一化并进入 chunk；抽取记录、图节点/边和向量 metadata 都携带 `file_path`，`source_id` 由 chunk ID 构成。图上的多个来源用 `GRAPH_FIELD_SEP` 拼接，且 `max_source_ids_per_entity/relation`、`max_file_paths` 会限制图属性和文件路径列表。`entity_chunks`/`relation_chunks`（若该写入路径启用且 tracking row 尚未缺失）才是删除重建时的 chunk 归属依据；`full_entities`/`full_relations` 只是恢复候选索引/超集，不是图所有权或 provenance 证据。查询输出再把这些字段转换为 `reference_id`、`file_path` 和可选 chunk 内容。[^lightrag-source-operate][^lightrag-source-lightrag]
+
+**源码核验后的业务结论：** LightRAG 的**文档摄取路径**实际是“chunk KV + 三类向量 + 实体关系图 + 文档/来源追踪”的异步可恢复 RAG pipeline；它不是“图、向量、全文三路索引”系统。`ainsert_custom_kg()` 等直接写入路径不在同等的文档级 recovery guarantee 内，需单独设计 journal/审计。若业务必须使用 BM25/全文匹配，需要为 OpenSearch 等后端写专用查询适配，或在 LightRAG 外部维护 lexical index；若要求原始会话级 provenance，则还必须在 `file_paths` 之外保存会话 ID、消息/工具偏移、内容哈希和授权记录。[^lightrag-source-lightrag][^lightrag-source-opensearch]
 
 ## 4. 与需求画像逐项对照
 
@@ -238,4 +295,10 @@ LightRAG 不读取 Claude Code/Codex/Cursor 本地目录，也没有用户画像
 [^lightrag-file-pipeline]: [LightRAG 官方文件处理流水线文档](https://github.com/HKUDS/LightRAG/blob/main/docs/FileProcessingPipeline.md)
 [^lightrag-workspace]: [LightRAG 官方 Workspace 隔离说明](https://github.com/HKUDS/LightRAG/blob/main/docs/LightRAG-API-Server.md#data-isolation-between-lightrag-instances)
 [^lightrag-sdk]: [LightRAG 官方 SDK 与 REST 使用边界](https://github.com/HKUDS/LightRAG/blob/main/docs/ProgramingWithCore.md)
+[^lightrag-source-lightrag]: [LightRAG 官方源码：`lightrag/lightrag.py`](https://github.com/HKUDS/LightRAG/blob/main/lightrag/lightrag.py)
+[^lightrag-source-pipeline]: [LightRAG 官方源码：`lightrag/pipeline.py`](https://github.com/HKUDS/LightRAG/blob/main/lightrag/pipeline.py)
+[^lightrag-source-operate]: [LightRAG 官方源码：`lightrag/operate.py`](https://github.com/HKUDS/LightRAG/blob/main/lightrag/operate.py)
+[^lightrag-source-namespace]: [LightRAG 官方源码：`lightrag/namespace.py`](https://github.com/HKUDS/LightRAG/blob/main/lightrag/namespace.py)
+[^lightrag-source-utils-graph]: [LightRAG 官方源码：`lightrag/utils_graph.py`](https://github.com/HKUDS/LightRAG/blob/main/lightrag/utils_graph.py)
+[^lightrag-source-opensearch]: [LightRAG 官方源码：`lightrag/kg/opensearch_impl.py`](https://github.com/HKUDS/LightRAG/blob/main/lightrag/kg/opensearch_impl.py)
 [^lightrag-frontend]: [LightRAG 官方前端构建说明](https://github.com/HKUDS/LightRAG/blob/main/docs/FrontendBuildGuide.md)
