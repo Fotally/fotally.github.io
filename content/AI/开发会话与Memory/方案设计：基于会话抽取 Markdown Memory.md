@@ -48,19 +48,19 @@ updated_at: 2026-09-06
 
 ## 3. 对各项目源码机制的借鉴
 
-| 项目 | 可借鉴的源码级思想 | 在本方案中的取舍 |
-| --- | --- | --- |
-| Mem0 | `add` 经 LLM 抽取短事实，再做去重/更新判断；写入与检索分离 | 保留作用域、候选关系和显式更新概念；暂不使用向量检索，自动抽取不直接覆盖正式 Memory |
-| Graphiti | Episode、事实边、来源关系、有效/失效时间、冲突使旧事实失效 | 用 Markdown frontmatter 和链接表达来源、时间和替代关系；不引入图数据库 |
-| Cognee | `add → cognify → recall/search` 分段；session memory 与长期知识分离 | 用 Episode、Memory Candidate 和 Published Memory 分层；不直接复制知识图谱管线 |
-| EverOS | Episode、AtomicFact、Profile、Skill 的 Markdown-first 演化，异步索引可重建 | 采用 Markdown 作为事实源，索引只做派生物 |
-| MemU | `prepare → Agent 判断/写作 → commit`；Agent 可以决定不保存 | Agent 只能写 Candidate，commit 通过人工审核和 Git 发布 |
-| claude-mem | 事件异步压缩为 observation/summary，索引→时间线→详情的渐进读取 | 保留原始来源，Episode 只是中间证据；用关键词/FTS 替代 Chroma |
+| 项目                     | 可借鉴的源码级思想                                                        | 在本方案中的取舍                                                           |
+| ---------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Mem0                   | `add` 经 LLM 抽取短事实，再做去重/更新判断；写入与检索分离                              | 保留作用域、候选关系和显式更新概念；暂不使用向量检索，自动抽取不直接覆盖正式 Memory                      |
+| Graphiti               | Episode、事实边、来源关系、有效/失效时间、冲突使旧事实失效                                | 用 Markdown frontmatter 和链接表达来源、时间和替代关系；不引入图数据库                     |
+| Cognee                 | `add → cognify → recall/search` 分段；session memory 与长期知识分离        | 用 Episode、Memory Candidate 和 Published Memory 分层；不直接复制知识图谱管线       |
+| EverOS                 | Episode、AtomicFact、Profile、Skill 的 Markdown-first 演化，异步索引可重建     | 采用 Markdown 作为事实源，索引只做派生物                                          |
+| MemU                   | `prepare → Agent 判断/写作 → commit`；Agent 可以决定不保存                   | Agent 只能写 Candidate，commit 通过人工审核和 Git 发布                          |
+| claude-mem             | 事件异步压缩为 observation/summary，索引→时间线→详情的渐进读取                       | 保留原始来源，Episode 只是中间证据；用关键词/FTS 替代 Chroma                           |
 | TencentDB-Agent-Memory | L0-L3、Chat Memory/Skill/Wiki/CodeGraph 分离、Team/Agent/Task/ACL 装配 | MVP 只实现 L0、Episode、Memory、Skill Candidate 和 Skill；权限先依赖目录/Git/审核角色 |
-| Letta Code | MemoryFS/Git-backed Memory 的可读、提交、回滚和同步 | 正式 Memory 由审核流程写入，Agent 不直接拥有生产写权限 |
-| Memobase | Profile/稳定事实与 Event/时间线分离，先缓冲再 flush | 使用 `memory_type` 与有效期区分稳定知识和临时事件 |
-| Hindsight | Retain、Recall、Reflect 分阶段；观察需要证据，反思不等于写入 | 将跨会话归纳放到周期性 Reflect，仍然输出 Candidate |
-| LightRAG/Supermemory | 来源、范围、关键词、事实演化、替代和过期关系 | 用标签、别名、`supersedes`、`conflicts_with` 和 `valid_until` 表达有限关系 |
+| Letta Code             | MemoryFS/Git-backed Memory 的可读、提交、回滚和同步                          | 正式 Memory 由审核流程写入，Agent 不直接拥有生产写权限                                 |
+| Memobase               | Profile/稳定事实与 Event/时间线分离，先缓冲再 flush                             | 使用 `memory_type` 与有效期区分稳定知识和临时事件                                   |
+| Hindsight              | Retain、Recall、Reflect 分阶段；观察需要证据，反思不等于写入                         | 将跨会话归纳放到周期性 Reflect，仍然输出 Candidate                                 |
+| LightRAG/Supermemory   | 来源、范围、关键词、事实演化、替代和过期关系                                           | 用标签、别名、`supersedes`、`conflicts_with` 和 `valid_until` 表达有限关系        |
 
 ## 4. 数据资产边界
 
